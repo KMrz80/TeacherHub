@@ -1,31 +1,27 @@
 /// <reference path="../pocketbase/pb_data/types.d.ts" />
 
-function actionError(message, status) {
-  const error = new Error(message)
-  error.status = status
-  return error
-}
-
-function actionContent(value) {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return null
-  return JSON.parse(JSON.stringify(value))
-}
-
-function actionCorrectAnswer(type, content) {
-  const text = (value) => typeof value === "string" ? value.trim() : ""
-  if (Object.prototype.hasOwnProperty.call(content, "correct_answer")) return content.correct_answer
-  if (type === "text_input" && text(content.answer)) return [text(content.answer)]
-  if (type === "reorder_words" && Array.isArray(content.correct_sequence)) return content.correct_sequence
-  if (type === "matching" && Array.isArray(content.pairs)) {
-    const pairs = content.pairs.filter((pair) => pair && typeof pair === "object" && !Array.isArray(pair) && text(pair.left) && text(pair.right))
-    if (pairs.length === content.pairs.length) return Object.fromEntries(pairs.map((pair) => [text(pair.left), text(pair.right)]))
-  }
-  if (type === "dropdown" && Array.isArray(content.items)) return content.items.map((item) => item && item.correct_answer)
-  return undefined
-}
-
 routerAdd("POST", "/api/teacherhub/worksheet-drafts", (e) => {
   const text = (value) => typeof value === "string" ? value.trim() : ""
+  const actionError = (message, status) => {
+    const error = new Error(message)
+    error.status = status
+    return error
+  }
+  const actionContent = (value) => {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return null
+    return JSON.parse(JSON.stringify(value))
+  }
+  const actionCorrectAnswer = (type, content) => {
+    if (Object.prototype.hasOwnProperty.call(content, "correct_answer")) return content.correct_answer
+    if (type === "text_input" && text(content.answer)) return [text(content.answer)]
+    if (type === "reorder_words" && Array.isArray(content.correct_sequence)) return content.correct_sequence
+    if (type === "matching" && Array.isArray(content.pairs)) {
+      const pairs = content.pairs.filter((pair) => pair && typeof pair === "object" && !Array.isArray(pair) && text(pair.left) && text(pair.right))
+      if (pairs.length === content.pairs.length) return Object.fromEntries(pairs.map((pair) => [text(pair.left), text(pair.right)]))
+    }
+    if (type === "dropdown" && Array.isArray(content.items)) return content.items.map((item) => item && item.correct_answer)
+    return undefined
+  }
   const configuredKey = $os.getenv("TEACHERHUB_ACTION_KEY")
   const authorization = e.request.header.get("Authorization") || ""
   const suppliedKey = authorization.startsWith("Bearer ") ? authorization.slice(7) : ""
