@@ -1,0 +1,37 @@
+# PocketBase local data and uploaded files
+pocketbase/pb_data/
+pb_data/
+
+# PocketBase local binaries
+pocketbase/pocketbase.exe
+pocketbase/pocketbase
+
+# Runtime logs and databases
+*.log
+*.db
+*.db-shm
+*.db-wal
+
+# Environment files and local secrets
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.pfx
+secrets/
+secrets.*
+credentials/
+credentials.*
+
+# Local editor and agent state
+.vscode/
+.idea/
+.codex/
+.agents/
+*.empty-backup/
+
+# OS metadata
+.DS_Store
+Thumbs.db
+Desktop.ini

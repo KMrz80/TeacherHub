@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="TeacherHub — прогресс и домашние задания по английскому языку">
+  <title>TeacherHub</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div id="app">
+    <section id="login-view" class="login-view">
+      <div class="login-brand" aria-hidden="true">
+        <div class="brand-mark"><span></span><span></span></div>
+        <div><strong>TeacherHub</strong><small>English Learning</small></div>
+      </div>
+      <form id="login-form" class="login-card">
+        <p class="eyebrow">С возвращением</p>
+        <h1>Вход в TeacherHub</h1>
+        <p class="muted">Следите за обучением и выполняйте домашние задания в одном месте.</p>
+        <label>Email<input id="email" type="email" autocomplete="username" placeholder="name@example.com" required></label>
+        <label>Пароль<input id="password" type="password" autocomplete="current-password" placeholder="Введите пароль" required></label>
+        <p id="login-error" class="form-error" role="alert"></p>
+        <button class="primary-button" type="submit">Войти <span>→</span></button>
+      </form>
+    </section>
+
+    <div id="workspace" class="workspace hidden">
+      <aside class="sidebar">
+        <div class="brand"><div class="brand-mark"><span></span><span></span></div><div><strong>TeacherHub</strong><small>English Learning</small></div></div>
+        <nav id="sidebar-nav" aria-label="Основная навигация"></nav>
+        <button id="logout-button" class="nav-button logout-button" type="button"><span class="nav-icon">↪</span>Выход</button>
+      </aside>
+      <main class="main-content">
+        <header class="topbar">
+          <div><p id="page-kicker" class="eyebrow"></p><h1 id="page-title">TeacherHub</h1><p id="page-subtitle" class="muted"></p></div>
+          <div id="profile-chip" class="profile-chip"></div>
+        </header>
+        <div id="content" aria-live="polite"></div>
+      </main>
+    </div>
+    <div id="loading" class="loading hidden" aria-live="polite"><span></span>Загрузка…</div>
+    <div id="toast" class="toast" role="status"></div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/pocketbase@0.26.2/dist/pocketbase.umd.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
