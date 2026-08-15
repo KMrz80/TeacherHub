@@ -94,9 +94,8 @@ routerAdd("POST", "/api/teacherhub/worksheet-drafts", (e) => {
 
     return e.json(200, { success: true, worksheet_id: worksheetId, status: "draft" })
   } catch (error) {
+    console.error("[TeacherHub Action] worksheet draft error:", error)
     const status = Number(error && error.status) || 500
-    const safeMessage = status < 500 || error.status ? String(error.message || error) : "Не удалось сохранить worksheet draft"
-    if (status >= 500) console.log(`[TeacherHub Action] worksheet draft error: ${String(error && error.message || error)}`)
-    return e.json(status, { success: false, error: safeMessage })
+    return e.json(status, { success: false, error: error && error.message || String(error) })
   }
 })
