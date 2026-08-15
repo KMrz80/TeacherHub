@@ -53,3 +53,20 @@ curl.exe -X POST "http://127.0.0.1:8090/api/teacherhub/worksheet-drafts" -H "Aut
   "error": "Описание ошибки"
 }
 ```
+
+## Railway deployment
+
+Railway собирает backend из корневого `Dockerfile`. Переменная `PORT` предоставляется Railway автоматически; PocketBase слушает `0.0.0.0:$PORT`.
+
+Настройка сервиса:
+
+1. Подключите GitHub-репозиторий к Railway.
+2. Создайте persistent volume и смонтируйте его в `/pb/pb_data`.
+3. Добавьте environment variable `TEACHERHUB_ACTION_KEY` в Variables сервиса. Не сохраняйте значение ключа в Git.
+4. В разделе Networking создайте public domain для сервиса.
+
+После публикации REST API будет доступен по созданному Railway domain, а Custom GPT Action endpoint — по адресу:
+
+```text
+https://<railway-public-domain>/api/teacherhub/worksheet-drafts
+```
