@@ -38,6 +38,14 @@ routerAdd("POST", "/api/teacherhub/worksheet-drafts", (e) => {
     const teachers = e.app.findRecordsByFilter("users", 'role = "teacher"', "created", 2, 0)
     if (teachers.length !== 1) throw actionError("Для Action endpoint должен быть настроен ровно один teacher-аккаунт", 500)
 
+    const requestedWorksheetId = text(body.worksheet_id)
+    if (requestedWorksheetId) {
+      let existingWorksheet
+      try { existingWorksheet = e.app.findRecordById("worksheets", requestedWorksheetId) }
+      catch (_) { throw actionError("Worksheet с указанным worksheet_id не найден", 404) }
+      if (existingWorksheet.getString("status") !== "draft") throw actionError("Обновлять через Action можно только worksheet draft", 400)
+    }
+
     const studentId = text(body.student_id)
     if (studentId) {
       try { e.app.findRecordById("students", studentId) }
@@ -59,7 +67,9 @@ routerAdd("POST", "/api/teacherhub/worksheet-drafts", (e) => {
 
     let worksheetId = ""
     e.app.runInTransaction((txApp) => {
-      const worksheet = new Record(txApp.findCollectionByNameOrId("worksheets"))
+      const worksheet = requestedWorksheetId
+        ? txApp.findRecordById("worksheets", requestedWorksheetId)
+        : new Record(txApp.findCollectionByNameOrId("worksheets"))
       worksheet.set("title", title)
       worksheet.set("instructions", learningGoal)
       worksheet.set("status", "draft")
@@ -73,6 +83,10 @@ routerAdd("POST", "/api/teacherhub/worksheet-drafts", (e) => {
       worksheetId = worksheet.id
 
       const collection = txApp.findCollectionByNameOrId("worksheet_exercises")
+      if (requestedWorksheetId) {
+        const previousExercises = txApp.findRecordsByFilter("worksheet_exercises", `worksheet = "${requestedWorksheetId}"`, "", 0, 0)
+        for (const previousExercise of previousExercises) txApp.delete(previousExercise)
+      }
       for (const data of exercises) {
         const exercise = new Record(collection)
         exercise.set("worksheet", worksheet.id)
