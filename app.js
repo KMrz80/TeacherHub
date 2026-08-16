@@ -333,7 +333,7 @@ async function renderWorksheetBuilder(navigationId = state.navigationId) {
   state.builderMaterials = materials; state.builderSections = sections; state.builderDrafts = drafts; state.questionCount = 0; state.editingWorksheet = null; state.editingHomework = null; state.editingSources = []; state.sourceMetadata = {};
   setHeader('Создать worksheet', 'Интерактивный рабочий лист для ученика.', 'Worksheet Builder');
   el('content').innerHTML = `<section class="drafts-panel card"><div class="card-title"><h2>Существующие черновики</h2><span>${drafts.length}</span></div><div class="draft-list">${drafts.map((draft) => `<button class="draft-item" data-draft-id="${draft.id}" type="button"><strong>${escapeHtml(draft.title)}</strong><span>${escapeHtml(draft.focus || draft.level || 'Черновик')}</span><small>${formatDate(draft.updated, true)}</small></button>`).join('') || '<p class="muted">Черновиков пока нет.</p>'}</div></section><form id="worksheet-form" class="worksheet-builder card"><section class="builder-step"><span>Шаг 1</span><h2>Ученик</h2><select name="student"><option value="">Без привязки к ученику</option>${state.students.map((student) => `<option value="${student.id}">${escapeHtml(student.name)}</option>`).join('')}</select>${state.students.length ? '' : '<p class="muted">Ученики пока не добавлены.</p>'}</section>
-    <section class="builder-step"><span>Шаг 2</span><h2>Параметры worksheet</h2><div class="form-grid"><label class="full-field">Цель / что отработать<textarea name="learning_goal" rows="3" required placeholder="Past Simple irregular verbs"></textarea></label><label>Название worksheet<input name="title" required placeholder="Past Simple review"></label><label>Уровень<input name="level" placeholder="A2"></label><label>Focus<input name="focus" placeholder="Irregular verbs"></label><label>Примерное время<input name="estimated_time" placeholder="15 minutes"></label><label>Срок<input name="due_date" type="datetime-local"></label></div></section>
+    <section class="builder-step"><span>Шаг 2</span><h2>Параметры worksheet</h2><div class="form-grid"><label class="full-field">Что отработать<textarea name="learning_goal" rows="4" required placeholder="he/she + is/isn't, вопросы Is he...? Is she...? и adjectives big, small, happy, sad"></textarea></label><label>Название worksheet<input name="title" required placeholder="Present Simple"></label><label>Примерное время<input name="estimated_time" placeholder="20 минут"></label><label>Срок<input name="due_date" type="datetime-local"></label></div></section>
     <section class="builder-step"><span>Шаг 3</span><h2>Источники</h2><p class="muted">Можно одновременно выбрать несколько материалов и загрузить несколько файлов.</p><div class="source-picker"><div><strong>Из библиотеки</strong><div class="library-checklist">${materials.map((m) => `<label><input type="checkbox" name="library_sources" value="${m.id}"> ${escapeHtml(m.title)}</label>`).join('') || '<div class="materials-empty"><p class="muted">В библиотеке пока нет материалов. Сначала добавьте материал.</p><button id="go-materials" class="secondary-button" type="button">Перейти в материалы</button></div>'}</div></div><label>Страницы / сканы<input name="source_files" type="file" multiple accept="image/jpeg,image/png,application/pdf"></label></div><div id="selected-sources" class="selected-sources"><span class="muted">Источники не выбраны</span></div></section>
     <section class="agent-launch builder-agent"><div><h2>Создать worksheet в AI-агенте</h2><p class="muted">Агент создаст worksheet по выбранным параметрам и материалам. После сохранения черновик появится в TeacherHub.</p></div><div class="agent-actions"><button id="copy-agent-prompt" class="secondary-button" type="button">Скопировать промпт для агента</button><a class="secondary-button" href="https://chatgpt.com/g/g-6a7f6d14a6c4819199f2014e5a233cfc-teacherhub-worksheet-builder" target="_blank" rel="noopener noreferrer">Открыть AI-агента</a></div></section>
     <section id="review-section" class="builder-step"><span>Шаг 4</span><div class="questions-heading"><div><h2>Упражнения</h2><p class="muted">Проверьте готовый worksheet перед публикацией.</p></div><button id="add-exercise" class="secondary-button" type="button">+ Добавить упражнение вручную</button></div><div class="review-toolbar"><button id="preview-worksheet" class="secondary-button" type="button">Предпросмотр как ученик</button></div><div id="exercise-list"></div></section>
@@ -354,55 +354,41 @@ function buildAgentPrompt() {
   const form = el('worksheet-form'), lines = [];
   const studentOption = form.elements.student.selectedOptions[0];
   const values = [
+    ['Worksheet ID', state.editingWorksheet?.id || ''],
     ['Ученик', form.elements.student.value ? studentOption?.textContent.trim() : ''],
-    ['Название worksheet', form.elements.title.value.trim()],
-    ['Уровень', form.elements.level.value.trim()],
-    ['Focus / topic', form.elements.focus.value.trim()],
-    ['Learning goal', form.elements.learning_goal.value.trim()],
-    ['Примерное время', form.elements.estimated_time.value.trim()],
-    ['Срок', form.elements.due_date.value],
+    ['Название', form.elements.title.value.trim()],
+    ['Что отработать', form.elements.learning_goal.value.trim()],
+    ['Время', form.elements.estimated_time.value.trim()],
   ];
   values.forEach(([label, value]) => { if (value) lines.push(`${label}: ${value}`); });
   rememberSourceMetadata();
-  const sources = [...form.querySelectorAll('.source-metadata')].map((source, index) => { const metadata = sourceMetadataFromRow(source), details = [`SOURCE ${index + 1}`, `Material: ${source.dataset.sourceLabel}`]; [['Pages', metadata.pages], ['Unit / section', metadata.unit], ['Exercises', metadata.exercises], ['Teacher note', metadata.teacher_note]].forEach(([label, value]) => { if (value) details.push(`${label}: ${value}`); }); return details.join('\n'); });
+  const sources = [...form.querySelectorAll('.source-metadata')].map((source, index) => { const metadata = sourceMetadataFromRow(source), details = [`SOURCE ${index + 1}`, `Material: ${source.dataset.sourceLabel}`]; if (metadata.unit) details.push(`Unit / section: ${metadata.unit}`); metadata.page_selections.forEach((selection) => { details.push(`Page ${selection.page}:`); if (selection.exercises) details.push(`Exercises: ${selection.exercises}`); }); if (metadata.teacher_note) details.push(`Teacher note:\n${metadata.teacher_note}`); return details.join('\n'); });
   if (sources.length) lines.push(sources.join('\n\n'));
-  lines.push(`Создай интерактивный worksheet для TeacherHub.
-Используй только выбранные материалы.
-Работай только с указанными источниками, страницами и упражнениями.
+  lines.unshift('Создай интерактивный worksheet для TeacherHub.');
+  lines.push(`Сначала получи реальные выбранные материалы этого worksheet через Action и проанализируй их.
 
-Если указаны конкретные pages/exercises, не используй остальные части материала.
+Используй только указанные страницы и упражнения.
+Если для страницы указаны конкретные exercises, не используй другие упражнения этой страницы.
 
-Не придумывай содержание страниц или упражнений, которых нет в выбранных sources.
-
-Teacher note имеет приоритет при отборе материала.
-
-Если каких-то данных недостаточно, сообщи об этом преподавателю вместо того, чтобы придумывать содержание.
-
-Сделай несколько связанных заданий с логикой:
-recognition / noticing → controlled practice → meaningful practice → application.
-
-Используй подходящие интерактивные механики TeacherHub.
-Все closed tasks должны быть пригодны для автопроверки.
-Open tasks помечай teacher-reviewed.
-
-Не создавай PDF.
-Не генерируй финальное изображение worksheet.
-Сначала покажи INTERACTIVE WORKSHEET DRAFT + Teacher Key + QA.
-Payload пока не формируй.
-Action не вызывай до моего подтверждения.`);
+Сначала покажи INTERACTIVE WORKSHEET DRAFT.
+Не сохраняй его в TeacherHub до моего подтверждения.`);
   return lines.join('\n\n');
 }
 async function copyAgentPrompt() {
+  setLoading(true); try { await ensureAgentWorksheetDraft(); } catch (error) { handleFatal(error); return; } finally { setLoading(false); }
   const prompt = buildAgentPrompt();
   try { await navigator.clipboard.writeText(prompt); }
   catch (_) { const textarea = document.createElement('textarea'); textarea.value = prompt; textarea.style.position = 'fixed'; textarea.style.opacity = '0'; document.body.appendChild(textarea); textarea.select(); const copied = document.execCommand('copy'); textarea.remove(); if (!copied) { toast('Не удалось скопировать промпт.'); return; } }
   toast('Промпт скопирован. Откройте AI-агента и вставьте его в чат.');
 }
 
-function sourceMetadataFromRow(row) { return { pages: row.querySelector('[name="source_pages"]').value.trim(), unit: row.querySelector('[name="source_unit"]').value.trim(), exercises: row.querySelector('[name="source_exercises"]').value.trim(), teacher_note: row.querySelector('[name="source_note"]').value.trim() }; }
+function sourceMetadataFromRow(row) { return { page_selections: [...row.querySelectorAll('.page-selection')].map((selection) => ({ page: selection.querySelector('[name="source_page"]').value.trim(), exercises: selection.querySelector('[name="source_page_exercises"]').value.trim() })).filter((selection) => selection.page), unit: row.querySelector('[name="source_unit"]').value.trim(), teacher_note: row.querySelector('[name="source_note"]').value.trim() }; }
 function rememberSourceMetadata() { document.querySelectorAll('.source-metadata').forEach((row) => { state.sourceMetadata[row.dataset.sourceKey] = sourceMetadataFromRow(row); }); }
-function sourceMetadataMarkup(item) { const metadata = state.sourceMetadata[item.key] || {}; return `<article class="source-metadata" data-source-key="${escapeAttr(item.key)}" data-source-label="${escapeAttr(item.label)}"><div class="source-metadata-title"><span class="source-chip">${item.type === 'library' ? '▦' : '↥'} ${escapeHtml(item.label)}</span><small>Параметры этого worksheet</small></div><div class="source-metadata-grid"><label>Pages / страницы<input name="source_pages" value="${escapeAttr(metadata.pages || '')}" placeholder="34–35"></label><label>Unit / section<input name="source_unit" value="${escapeAttr(metadata.unit || '')}" placeholder="Unit 4 Grammar"></label><label>Exercises / упражнения<input name="source_exercises" value="${escapeAttr(metadata.exercises || '')}" placeholder="Ex. 1, Ex. 3, Remember box"></label><label class="full-field">Teacher note<textarea name="source_note" rows="2" placeholder="Методические ограничения для этого источника">${escapeHtml(metadata.teacher_note || '')}</textarea></label></div></article>`; }
-function updateSelectedSources() { const form = el('worksheet-form'); rememberSourceMetadata(); const selected = [...form.querySelectorAll('[name="library_sources"]:checked')].map((input) => ({ type: 'library', id: input.value, key: `library-${input.value}`, label: state.builderMaterials.find((m) => m.id === input.value)?.title || 'Материал' })); const savedUploads = (state.editingSources || []).filter((source) => source.source_type === 'upload').map((source) => ({ type: 'upload', id: source.id, key: `saved-${source.id}`, label: source.uploaded_file || 'Загруженный файл' })); const uploads = [...form.elements.source_files.files].map((file, index) => ({ type: 'upload', key: `upload-${index}`, label: file.name })); const items = [...selected, ...savedUploads, ...uploads]; el('selected-sources').innerHTML = items.length ? items.map(sourceMetadataMarkup).join('') : '<span class="muted">Источники не выбраны</span>'; }
+function pageSelectionMarkup(selection = {}) { return `<div class="page-selection"><label>Страница<input name="source_page" value="${escapeAttr(selection.page || '')}" placeholder="39"></label><label>Упражнения<input name="source_page_exercises" value="${escapeAttr(selection.exercises || '')}" placeholder="1, 2"></label><button class="danger-button remove-page-selection" type="button">Удалить</button></div>`; }
+function normalizedPageSelections(metadata = {}) { if (Array.isArray(metadata.page_selections) && metadata.page_selections.length) return metadata.page_selections; if (metadata.pages || metadata.exercises) return [{ page: metadata.pages || '', exercises: metadata.exercises || '' }]; return []; }
+function sourceMetadataMarkup(item) { const metadata = state.sourceMetadata[item.key] || {}, selections = normalizedPageSelections(metadata); return `<article class="source-metadata" data-source-key="${escapeAttr(item.key)}" data-source-label="${escapeAttr(item.label)}"><div class="source-metadata-title"><span class="source-chip">${item.type === 'library' ? '▦' : '↥'} ${escapeHtml(item.label)}</span><small>Параметры этого worksheet</small></div><label>Unit / section<input name="source_unit" value="${escapeAttr(metadata.unit || '')}" placeholder="Unit 4 Composition Practice"></label><div class="page-selections">${selections.map(pageSelectionMarkup).join('')}</div><button class="secondary-button add-page-selection" type="button">+ Добавить страницу</button><label>Teacher note<textarea name="source_note" rows="3" placeholder="Методические ограничения для этого источника">${escapeHtml(metadata.teacher_note || '')}</textarea></label></article>`; }
+function bindSourceMetadataControls() { document.querySelectorAll('.source-metadata').forEach((source) => { const bindRemove = (button) => button.addEventListener('click', () => button.closest('.page-selection').remove()); source.querySelectorAll('.remove-page-selection').forEach(bindRemove); source.querySelector('.add-page-selection').addEventListener('click', () => { const wrapper = document.createElement('div'); wrapper.innerHTML = pageSelectionMarkup(); const selection = wrapper.firstElementChild; source.querySelector('.page-selections').appendChild(selection); bindRemove(selection.querySelector('.remove-page-selection')); }); }); }
+function updateSelectedSources() { const form = el('worksheet-form'); rememberSourceMetadata(); const selected = [...form.querySelectorAll('[name="library_sources"]:checked')].map((input) => ({ type: 'library', id: input.value, key: `library-${input.value}`, label: state.builderMaterials.find((m) => m.id === input.value)?.title || 'Материал' })); const savedUploads = (state.editingSources || []).filter((source) => source.source_type === 'upload').map((source) => ({ type: 'upload', id: source.id, key: `saved-${source.id}`, label: source.uploaded_file || 'Загруженный файл' })); const uploads = [...form.elements.source_files.files].map((file, index) => ({ type: 'upload', key: `upload-${index}`, label: file.name })); const items = [...selected, ...savedUploads, ...uploads]; el('selected-sources').innerHTML = items.length ? items.map(sourceMetadataMarkup).join('') : '<span class="muted">Источники не выбраны</span>'; bindSourceMetadataControls(); }
 
 function answerList(value) { if (Array.isArray(value)) return value.map((item) => String(item)); if (value === null || value === undefined || value === '') return []; return [String(value)]; }
 function normalizeDraftExercise(record) {
@@ -429,7 +415,7 @@ async function openWorksheetDraft(id) {
       pb.collection('homework').getList(1, 1, { filter: `worksheet="${id}"`, sort: '-created', requestKey: null }).catch(() => ({ items: [] })),
     ]);
     state.editingWorksheet = draft; state.editingSources = sources; state.editingHomework = homeworkResult.items[0] || null; state.editingExerciseIds = exerciseRecords.map((record) => record.id); state.sourceMetadata = Object.fromEntries(sources.map((source) => [source.source_type === 'library' ? `library-${source.material}` : `saved-${source.id}`, source.metadata || {}]));
-    const form = el('worksheet-form'); form.elements.student.value = draft.student || state.editingHomework?.student || ''; form.elements.title.value = draft.title || ''; form.elements.learning_goal.value = draft.instructions || ''; form.elements.level.value = draft.level || ''; form.elements.focus.value = draft.focus || ''; form.elements.estimated_time.value = draft.estimated_time || ''; form.elements.due_date.value = datetimeLocalValue(draft.due_date || state.editingHomework?.due_date);
+    const form = el('worksheet-form'); form.elements.student.value = draft.student || state.editingHomework?.student || ''; form.elements.title.value = draft.title || ''; form.elements.learning_goal.value = draft.instructions || draft.focus || ''; form.elements.estimated_time.value = draft.estimated_time || ''; form.elements.due_date.value = datetimeLocalValue(draft.due_date || state.editingHomework?.due_date);
     form.querySelectorAll('[name="library_sources"]').forEach((input) => { input.checked = sources.some((source) => source.source_type === 'library' && source.material === input.value); });
     el('exercise-list').innerHTML = ''; state.questionCount = 0; exerciseRecords.map(normalizeDraftExercise).forEach((exercise) => addWorksheetExercise(exercise)); if (!exerciseRecords.length) renderExerciseEmptyState();
     updateSelectedSources(); setHeader('Редактировать worksheet', 'Проверьте черновик и внесите необходимые изменения.', 'Worksheet Builder'); document.querySelectorAll('.draft-item').forEach((button) => button.classList.toggle('active', button.dataset.draftId === id)); form.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -489,26 +475,36 @@ function moveExercise(node, direction) { const sibling = direction === 'up' ? no
 
 function showBuilderPreview() { const nodes = [...document.querySelectorAll('.exercise-editor')], exercises = nodes.map((node, order) => ({ id: `preview-${order}`, ...readWorksheetExercise(node, order) })).filter(Boolean); const form = el('worksheet-form'); el('worksheet-preview-content').innerHTML = `<div class="worksheet-page"><div class="worksheet-intro"><p class="eyebrow">Предпросмотр как ученик</p><h2>${escapeHtml(form.elements.title.value || 'Worksheet')}</h2><p>${escapeHtml(form.elements.learning_goal.value)}</p></div>${exercises.map(worksheetExerciseMarkup).join('')}</div>`; bindDragDrop(el('worksheet-preview-content')); el('worksheet-preview-dialog').showModal(); }
 
+function worksheetDataFromForm(status = 'draft') { const form = el('worksheet-form'), due = form.elements.due_date.value, learningGoal = form.elements.learning_goal.value.trim(); return { student: form.elements.student.value, title: form.elements.title.value.trim(), instructions: learningGoal, focus: learningGoal, estimated_time: form.elements.estimated_time.value.trim(), status, due_date: due ? new Date(due).toISOString() : '', created_by: pb.authStore.record.id }; }
+async function syncWorksheetSources(worksheetId) {
+  const form = el('worksheet-form'); rememberSourceMetadata(); const selectedMaterials = [...form.querySelectorAll('[name="library_sources"]:checked')].map((input) => input.value), existingLibrarySources = (state.editingSources || []).filter((source) => source.source_type === 'library');
+  for (const source of existingLibrarySources) { if (!selectedMaterials.includes(source.material)) await pb.collection('worksheet_sources').delete(source.id); else await pb.collection('worksheet_sources').update(source.id, { metadata: state.sourceMetadata[`library-${source.material}`] || {} }); }
+  for (const source of (state.editingSources || []).filter((item) => item.source_type === 'upload')) await pb.collection('worksheet_sources').update(source.id, { metadata: state.sourceMetadata[`saved-${source.id}`] || {} });
+  let sourceOrder = (state.editingSources || []).filter((source) => source.source_type === 'upload').length;
+  for (const material of selectedMaterials) if (!existingLibrarySources.some((source) => source.material === material)) await pb.collection('worksheet_sources').create({ worksheet: worksheetId, material, source_type: 'library', metadata: state.sourceMetadata[`library-${material}`] || {}, order: sourceOrder++ });
+  for (const [index, file] of [...form.elements.source_files.files].entries()) { const data = new FormData(); data.set('worksheet', worksheetId); data.set('uploaded_file', file); data.set('source_type', 'upload'); data.set('metadata', JSON.stringify(state.sourceMetadata[`upload-${index}`] || {})); data.set('order', sourceOrder++); await pb.collection('worksheet_sources').create(data); }
+  state.editingSources = await pb.collection('worksheet_sources').getFullList({ filter: `worksheet="${worksheetId}"`, sort: 'order', requestKey: null }); form.elements.source_files.value = ''; state.sourceMetadata = Object.fromEntries(state.editingSources.map((source) => [source.source_type === 'library' ? `library-${source.material}` : `saved-${source.id}`, source.metadata || {}])); updateSelectedSources();
+}
+async function ensureAgentWorksheetDraft() {
+  const form = el('worksheet-form'); if (!form.reportValidity()) throw new Error('Заполните название и поле «Что отработать».');
+  const worksheet = state.editingWorksheet ? await pb.collection('worksheets').update(state.editingWorksheet.id, worksheetDataFromForm('draft')) : await pb.collection('worksheets').create(worksheetDataFromForm('draft'));
+  state.editingWorksheet = worksheet; if (!state.builderDrafts.some((draft) => draft.id === worksheet.id)) state.builderDrafts.unshift(worksheet); await syncWorksheetSources(worksheet.id);
+}
+
 async function saveWorksheet(event) {
   event.preventDefault(); const form = event.currentTarget; const status = event.submitter?.dataset.status || 'draft'; const nodes = [...form.querySelectorAll('.exercise-editor')];
   el('worksheet-error').textContent = ''; if (!nodes.length) { el('worksheet-error').textContent = 'Добавьте хотя бы одно упражнение.'; return; }
   const exercises = nodes.map((node, order) => readWorksheetExercise(node, order)); if (exercises.some((x) => !x)) { el('worksheet-error').textContent = 'Проверьте заполнение упражнений.'; return; }
-  const selectedMaterials = [...form.querySelectorAll('[name="library_sources"]:checked')].map((input) => input.value); const due = form.elements.due_date.value; setLoading(true);
+  setLoading(true);
   try {
-    rememberSourceMetadata();
-    const worksheetData = { student: form.elements.student.value, title: form.elements.title.value.trim(), instructions: form.elements.learning_goal.value.trim(), status, due_date: due ? new Date(due).toISOString() : '', level: form.elements.level.value.trim(), focus: form.elements.focus.value.trim(), estimated_time: form.elements.estimated_time.value.trim(), created_by: pb.authStore.record.id };
+    const worksheetData = worksheetDataFromForm(status);
     const worksheet = state.editingWorksheet ? await pb.collection('worksheets').update(state.editingWorksheet.id, worksheetData) : await pb.collection('worksheets').create(worksheetData);
     const retainedExerciseIds = [];
     for (let index = 0; index < exercises.length; index++) { const recordId = nodes[index].dataset.recordId; if (recordId) { await pb.collection('worksheet_exercises').update(recordId, { ...exercises[index], worksheet: worksheet.id }); retainedExerciseIds.push(recordId); } else { const created = await pb.collection('worksheet_exercises').create({ ...exercises[index], worksheet: worksheet.id }); retainedExerciseIds.push(created.id); } }
     for (const oldId of state.editingExerciseIds || []) if (!retainedExerciseIds.includes(oldId)) await pb.collection('worksheet_exercises').delete(oldId);
-    const existingLibrarySources = (state.editingSources || []).filter((source) => source.source_type === 'library');
-    for (const source of existingLibrarySources) { if (!selectedMaterials.includes(source.material)) await pb.collection('worksheet_sources').delete(source.id); else await pb.collection('worksheet_sources').update(source.id, { metadata: state.sourceMetadata[`library-${source.material}`] || {} }); }
-    for (const source of (state.editingSources || []).filter((item) => item.source_type === 'upload')) await pb.collection('worksheet_sources').update(source.id, { metadata: state.sourceMetadata[`saved-${source.id}`] || {} });
-    let sourceOrder = (state.editingSources || []).filter((source) => source.source_type === 'upload').length;
-    for (const material of selectedMaterials) if (!existingLibrarySources.some((source) => source.material === material)) await pb.collection('worksheet_sources').create({ worksheet: worksheet.id, material, source_type: 'library', metadata: state.sourceMetadata[`library-${material}`] || {}, order: sourceOrder++ });
-    for (const [index, file] of [...form.elements.source_files.files].entries()) { const data = new FormData(); data.set('worksheet', worksheet.id); data.set('uploaded_file', file); data.set('source_type', 'upload'); data.set('metadata', JSON.stringify(state.sourceMetadata[`upload-${index}`] || {})); data.set('order', sourceOrder++); await pb.collection('worksheet_sources').create(data); }
+    await syncWorksheetSources(worksheet.id);
     let homework = state.editingHomework;
-    if (form.elements.student.value) { const homeworkData = { student: form.elements.student.value, title: form.elements.title.value.trim(), instructions: form.elements.learning_goal.value.trim(), due_date: due ? new Date(due).toISOString() : '', status, created_by: pb.authStore.record.id, worksheet: worksheet.id }; homework = homework ? await pb.collection('homework').update(homework.id, homeworkData) : await pb.collection('homework').create(homeworkData); }
+    if (form.elements.student.value) { const homeworkData = { student: form.elements.student.value, title: form.elements.title.value.trim(), instructions: form.elements.learning_goal.value.trim(), due_date: worksheetData.due_date, status, created_by: pb.authStore.record.id, worksheet: worksheet.id }; homework = homework ? await pb.collection('homework').update(homework.id, homeworkData) : await pb.collection('homework').create(homeworkData); }
     if (status === 'published' && homework) state.teacherData.homework.unshift(homework); toast(status === 'published' ? 'Worksheet опубликован' : 'Черновик worksheet сохранён'); await navigate('home');
   } catch (error) { handleFatal(error); } finally { setLoading(false); }
 }
