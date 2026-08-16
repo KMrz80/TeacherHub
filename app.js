@@ -1,5 +1,6 @@
 /* global PocketBase */
-const PB_URL = 'http://127.0.0.1:8090';
+const IS_LOCAL = ['localhost', '127.0.0.1'].includes(window.location.hostname);
+const PB_URL = IS_LOCAL ? 'http://127.0.0.1:8090' : 'https://teacherhub-production-c8bf.up.railway.app';
 const pb = new PocketBase(PB_URL);
 
 const el = (id) => document.getElementById(id);
