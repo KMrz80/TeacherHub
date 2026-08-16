@@ -359,18 +359,23 @@ function buildAgentPrompt() {
     ['Название', form.elements.title.value.trim()],
     ['Что отработать', form.elements.learning_goal.value.trim()],
     ['Время', form.elements.estimated_time.value.trim()],
+    ['Срок', form.elements.due_date.value],
   ];
   values.forEach(([label, value]) => { if (value) lines.push(`${label}: ${value}`); });
   rememberSourceMetadata();
-  const sources = [...form.querySelectorAll('.source-metadata')].map((source, index) => { const metadata = sourceMetadataFromRow(source), details = [`SOURCE ${index + 1}`, `Material: ${source.dataset.sourceLabel}`]; if (metadata.unit) details.push(`Unit / section: ${metadata.unit}`); metadata.page_selections.forEach((selection) => { details.push(`Page ${selection.page}:`); if (selection.exercises) details.push(`Exercises: ${selection.exercises}`); }); if (metadata.teacher_note) details.push(`Teacher note:\n${metadata.teacher_note}`); return details.join('\n'); });
+  const sources = [...form.querySelectorAll('.source-metadata')].map((source, index) => { const metadata = sourceMetadataFromRow(source), details = [`SOURCE ${index + 1}`, `Material: ${source.dataset.sourceLabel}`]; metadata.page_selections.forEach((selection) => { details.push(`Page ${selection.page}:`); if (selection.exercises) details.push(`Exercises: ${selection.exercises}`); }); if (metadata.unit) details.push(`Unit / section: ${metadata.unit}`); if (metadata.teacher_note) details.push(`Teacher note: ${metadata.teacher_note}`); return details.join('\n'); });
   if (sources.length) lines.push(sources.join('\n\n'));
   lines.unshift('Создай интерактивный worksheet для TeacherHub.');
-  lines.push(`Сначала получи реальные выбранные материалы этого worksheet через Action и проанализируй их.
+  lines.push(`ВАЖНО:
+сначала вызови getWorksheetSources для этого Worksheet ID
+и получи реальные выбранные материалы из TeacherHub.
 
-Используй только указанные страницы и упражнения.
-Если для страницы указаны конкретные exercises, не используй другие упражнения этой страницы.
+Не ищи эти страницы в Knowledge и не проси меня загружать их повторно.
 
-Сначала покажи INTERACTIVE WORKSHEET DRAFT.
+Проанализируй реальные source-файлы и используй только указанные страницы и упражнения.
+
+После анализа создай INTERACTIVE WORKSHEET DRAFT + Teacher Key + QA.
+
 Не сохраняй его в TeacherHub до моего подтверждения.`);
   return lines.join('\n\n');
 }
