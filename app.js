@@ -51,6 +51,8 @@ async function navigate(route) {
   state.route = route; const navigationId = ++state.navigationId; setLoading(true);
   try {
     document.querySelectorAll('[data-route]').forEach((button) => button.classList.toggle('active', button.dataset.route === route || (route === 'task' && button.dataset.route === 'homework')));
+    if (state.role === 'teacher' && route === 'materials') { setHeader('Материалы', 'Загрузка библиотеки…', 'Личная библиотека'); el('content').innerHTML = '<section class="card empty-state">Загрузка материалов…</section>'; }
+    if (state.role === 'teacher' && route === 'worksheet-builder') { setHeader('Создать worksheet', 'Загрузка Worksheet Builder…', 'Worksheet Builder'); el('content').innerHTML = '<section class="card empty-state">Загрузка worksheet и черновиков…</section>'; }
     if (state.role === 'parent') await loadParentData(); else await loadTeacherData();
     if (navigationId !== state.navigationId) return;
     const teacherRoutes = { materials: renderMaterials, 'worksheet-builder': renderWorksheetBuilder };
@@ -60,7 +62,7 @@ async function navigate(route) {
     else if (route === 'homework') renderHomeworkOverview();
     else if (route === 'progress') renderProgressPage();
     else renderParentHome();
-  } catch (error) { if (navigationId === state.navigationId) handleFatal(error); } finally { if (navigationId === state.navigationId) setLoading(false); }
+  } catch (error) { if (navigationId === state.navigationId) { if (state.role === 'teacher' && ['materials', 'worksheet-builder'].includes(route)) el('content').innerHTML = `<section class="card empty-state">Не удалось загрузить раздел. Проверьте подключение к TeacherHub и повторите попытку.</section>`; handleFatal(error); } } finally { if (navigationId === state.navigationId) setLoading(false); }
 }
 
 async function loadParentData() {
