@@ -4,7 +4,7 @@ const PB_URL = IS_LOCAL ? 'http://127.0.0.1:8090' : 'https://teacherhub-producti
 const pb = new PocketBase(PB_URL);
 
 const el = (id) => document.getElementById(id);
-const state = { role: '', route: 'home', students: [], student: null, progress: null, homework: null, tasks: [], result: null, editingStudentId: null, homeworkStudentId: null, questionCount: 0 };
+const state = { role: '', route: 'home', navigationId: 0, students: [], student: null, progress: null, homework: null, tasks: [], result: null, editingStudentId: null, homeworkStudentId: null, questionCount: 0 };
 const skills = [
   ['vocabulary', 'Vocabulary', 'V'], ['grammar', 'Grammar', 'G'], ['reading', 'Reading', 'R'],
   ['listening', 'Listening', 'L'], ['speaking', 'Speaking', 'S'],
@@ -48,18 +48,19 @@ function renderShell() {
 }
 
 async function navigate(route) {
-  state.route = route; setLoading(true);
+  state.route = route; const navigationId = ++state.navigationId; setLoading(true);
   try {
     document.querySelectorAll('[data-route]').forEach((button) => button.classList.toggle('active', button.dataset.route === route || (route === 'task' && button.dataset.route === 'homework')));
     if (state.role === 'parent') await loadParentData(); else await loadTeacherData();
-    if (state.role === 'teacher' && route === 'materials') await renderMaterials();
-    else if (state.role === 'teacher' && route === 'worksheet-builder') await renderWorksheetBuilder();
+    if (navigationId !== state.navigationId) return;
+    const teacherRoutes = { materials: renderMaterials, 'worksheet-builder': renderWorksheetBuilder };
+    if (state.role === 'teacher' && teacherRoutes[route]) await teacherRoutes[route](navigationId);
     else if (state.role === 'teacher') renderTeacher();
     else if (route === 'task') await renderTask();
     else if (route === 'homework') renderHomeworkOverview();
     else if (route === 'progress') renderProgressPage();
     else renderParentHome();
-  } catch (error) { handleFatal(error); } finally { setLoading(false); }
+  } catch (error) { if (navigationId === state.navigationId) handleFatal(error); } finally { if (navigationId === state.navigationId) setLoading(false); }
 }
 
 async function loadParentData() {
@@ -293,8 +294,9 @@ async function saveStudentProgress(button) {
   } catch (error) { handleFatal(error); button.disabled = false; } finally { setLoading(false); }
 }
 
-async function renderMaterials() {
+async function renderMaterials(navigationId = state.navigationId) {
   const materials = await pb.collection('materials').getFullList({ sort: 'title', requestKey: null });
+  if (navigationId !== state.navigationId || state.route !== 'materials') return;
   setHeader('Материалы', 'Файлы для подготовки интерактивных рабочих листов.', 'Личная библиотека');
   el('content').innerHTML = `<div class="materials-layout"><form id="material-form" class="card material-form"><div class="card-title"><h2>Добавить материал</h2></div><label>Название<input name="title" required></label><label>Файл<input name="file" type="file" required accept=".pdf,.doc,.docx,.ppt,.pptx,image/jpeg,image/png"></label><button class="primary-button" type="submit">Добавить в библиотеку</button></form>
     <section class="grid material-list">${materials.map((material) => `<article class="card material-card"><p class="eyebrow">${escapeHtml(materialFileType(material.file))}</p><h2>${escapeHtml(material.title)}</h2><p class="muted file-name">${escapeHtml(material.file || 'Файл не загружен')}</p><div class="material-actions">${material.file ? `<a class="secondary-button" href="${escapeAttr(pb.files.getURL(material, material.file))}" target="_blank" rel="noopener">Открыть</a>` : ''}<button class="secondary-button rename-material" data-id="${material.id}" data-title="${escapeAttr(material.title)}" type="button">Переименовать</button><label class="secondary-button replace-file">Заменить файл<input data-id="${material.id}" type="file" accept=".pdf,.doc,.docx,.ppt,.pptx,image/jpeg,image/png"></label><button class="danger-button delete-material" data-id="${material.id}" type="button">Удалить</button></div></article>`).join('') || '<div class="card empty-state">В библиотеке пока нет материалов.</div>'}</section></div>`;
@@ -315,8 +317,9 @@ async function renameMaterial(button) { const title = window.prompt('Новое 
 async function replaceMaterialFile(input) { if (!input.files[0]) return; const data = new FormData(); data.set('file', input.files[0]); setLoading(true); try { await pb.collection('materials').update(input.dataset.id, data); toast('Файл заменён'); await renderMaterials(); } catch (error) { handleFatal(error); } finally { setLoading(false); } }
 async function deleteMaterial(id) { if (!window.confirm('Удалить материал? Это действие нельзя отменить.')) return; setLoading(true); try { const [sources, worksheets] = await Promise.all([pb.collection('worksheet_sources').getList(1, 1, { filter: `material="${id}"`, requestKey: null }), pb.collection('worksheets').getList(1, 1, { filter: `source_material="${id}"`, requestKey: null })]); if (sources.totalItems || worksheets.totalItems) { toast('Материал используется в worksheet. Сначала отвяжите его.'); return; } await pb.collection('materials').delete(id); toast('Материал удалён'); await renderMaterials(); } catch (error) { handleFatal(error); } finally { setLoading(false); } }
 
-async function renderWorksheetBuilder() {
+async function renderWorksheetBuilder(navigationId = state.navigationId) {
   const [materials, sections, drafts] = await Promise.all([pb.collection('materials').getFullList({ sort: 'title', requestKey: null }), pb.collection('material_sections').getFullList({ sort: 'order', requestKey: null }), pb.collection('worksheets').getFullList({ filter: 'status="draft"', sort: '-created', requestKey: null })]);
+  if (navigationId !== state.navigationId || state.route !== 'worksheet-builder') return;
   state.builderMaterials = materials; state.builderSections = sections; state.builderDrafts = drafts; state.questionCount = 0; state.editingWorksheet = null; state.editingHomework = null; state.editingSources = [];
   setHeader('Создать worksheet', 'Интерактивный рабочий лист для ученика.', 'Worksheet Builder');
   el('content').innerHTML = `<section class="agent-launch card"><div><h2>AI-агент для worksheet</h2><p class="muted">Создайте или доработайте worksheet в AI-агенте, затем вернитесь в TeacherHub.</p></div><a class="secondary-button" href="https://chatgpt.com/g/g-6a7f6d14a6c4819199f2014e5a233cfc-teacherhub-worksheet-builder" target="_blank" rel="noopener noreferrer">Открыть AI-агента</a></section><section class="drafts-panel card"><div class="card-title"><h2>Существующие черновики</h2><span>${drafts.length}</span></div><div class="draft-list">${drafts.map((draft) => `<button class="draft-item" data-draft-id="${draft.id}" type="button"><strong>${escapeHtml(draft.title)}</strong><span>${escapeHtml(draft.focus || draft.level || 'Черновик')}</span><small>${formatDate(draft.updated, true)}</small></button>`).join('') || '<p class="muted">Черновиков пока нет.</p>'}</div></section><form id="worksheet-form" class="worksheet-builder card"><section class="builder-step"><span>Шаг 1</span><h2>Ученик</h2><select name="student" required><option value="">Выберите ученика</option>${state.students.map((student) => `<option value="${student.id}">${escapeHtml(student.name)}</option>`).join('')}</select></section>
