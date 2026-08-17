@@ -21,6 +21,7 @@
 .worksheet-label{margin:0;color:var(--primary);font-size:.72rem;font-weight:800;letter-spacing:.13em;text-transform:uppercase}
 .student-worksheet .worksheet-intro h2{max-width:680px;font-size:clamp(1.8rem,4vw,2.45rem);margin:8px 0 12px;letter-spacing:-.035em}
 .worksheet-goal{max-width:700px;margin:0;color:#44516e;line-height:1.6;white-space:pre-wrap}
+.worksheet-intro-text{padding:26px clamp(20px,5vw,50px);border-bottom:1px solid var(--line);background:#fbfcff;color:#263451;line-height:1.7;white-space:normal}
 .worksheet-meta{display:flex;flex-wrap:wrap;gap:9px;margin-top:20px}
 .worksheet-meta span{padding:7px 11px;border:1px solid #d9deeb;border-radius:99px;background:rgba(255,255,255,.78);color:#46516e;font-size:.8rem;font-weight:700}
 .student-worksheet .worksheet-exercise{position:static;padding:36px clamp(24px,6vw,64px);border-bottom:1px solid #e5e9f0}

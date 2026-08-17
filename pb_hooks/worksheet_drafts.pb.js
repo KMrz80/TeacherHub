@@ -72,6 +72,7 @@ routerAdd("POST", "/api/teacherhub/worksheet-drafts", (e) => {
         : new Record(txApp.findCollectionByNameOrId("worksheets"))
       worksheet.set("title", title)
       worksheet.set("instructions", learningGoal)
+      worksheet.set("intro_text", text(body.intro_text))
       worksheet.set("status", "draft")
       worksheet.set("created_by", teachers[0].id)
       worksheet.set("student", studentId)
