@@ -2,6 +2,7 @@
 const IS_LOCAL = ['localhost', '127.0.0.1'].includes(window.location.hostname);
 const PB_URL = IS_LOCAL ? 'http://127.0.0.1:8090' : 'https://teacherhub-production-c8bf.up.railway.app';
 const pb = new PocketBase(PB_URL);
+const SOURCE_UPLOAD_LIMIT = 100 * 1024 * 1024;
 
 const el = (id) => document.getElementById(id);
 const state = { role: '', route: 'home', navigationId: 0, students: [], student: null, progress: null, homework: null, tasks: [], result: null, editingStudentId: null, homeworkStudentId: null, pendingWorksheetStudentId: null, questionCount: 0 };
@@ -317,14 +318,14 @@ async function renderMaterials(navigationId = state.navigationId) {
 }
 
 async function saveMaterial(event) {
-  event.preventDefault(); const form = event.currentTarget; const data = new FormData();
-  data.set('title', form.elements.title.value.trim()); data.set('created_by', pb.authStore.record.id); data.set('file', form.elements.file.files[0]);
+  event.preventDefault(); const form = event.currentTarget, file = form.elements.file.files[0]; if (file?.size > SOURCE_UPLOAD_LIMIT) { toast('Максимальный размер файла — 100 МБ'); return; } const data = new FormData();
+  data.set('title', form.elements.title.value.trim()); data.set('created_by', pb.authStore.record.id); data.set('file', file);
   setLoading(true); try { await pb.collection('materials').create(data); toast('Материал добавлен'); await renderMaterials(); } catch (error) { handleFatal(error); } finally { setLoading(false); }
 }
 
 function materialFileType(file) { const extension = String(file || '').split('.').pop().toUpperCase(); return extension || 'Документ'; }
 async function renameMaterial(button) { const title = window.prompt('Новое название материала', button.dataset.title); if (!title?.trim()) return; setLoading(true); try { await pb.collection('materials').update(button.dataset.id, { title: title.trim() }); toast('Материал переименован'); await renderMaterials(); } catch (error) { handleFatal(error); } finally { setLoading(false); } }
-async function replaceMaterialFile(input) { if (!input.files[0]) return; const data = new FormData(); data.set('file', input.files[0]); setLoading(true); try { await pb.collection('materials').update(input.dataset.id, data); toast('Файл заменён'); await renderMaterials(); } catch (error) { handleFatal(error); } finally { setLoading(false); } }
+async function replaceMaterialFile(input) { if (!input.files[0]) return; if (input.files[0].size > SOURCE_UPLOAD_LIMIT) { toast('Максимальный размер файла — 100 МБ'); input.value = ''; return; } const data = new FormData(); data.set('file', input.files[0]); setLoading(true); try { await pb.collection('materials').update(input.dataset.id, data); toast('Файл заменён'); await renderMaterials(); } catch (error) { handleFatal(error); } finally { setLoading(false); } }
 async function deleteMaterial(id) { if (!window.confirm('Удалить материал? Это действие нельзя отменить.')) return; setLoading(true); try { const [sources, worksheets] = await Promise.all([pb.collection('worksheet_sources').getList(1, 1, { filter: `material="${id}"`, requestKey: null }), pb.collection('worksheets').getList(1, 1, { filter: `source_material="${id}"`, requestKey: null })]); if (sources.totalItems || worksheets.totalItems) { toast('Материал используется в worksheet. Сначала отвяжите его.'); return; } await pb.collection('materials').delete(id); toast('Материал удалён'); await renderMaterials(); } catch (error) { handleFatal(error); } finally { setLoading(false); } }
 
 async function renderWorksheetBuilder(navigationId = state.navigationId) {
@@ -333,14 +334,15 @@ async function renderWorksheetBuilder(navigationId = state.navigationId) {
   const drafts = worksheets.filter((worksheet) => worksheet.status === 'draft');
   state.builderMaterials = materials; state.builderSections = sections; state.builderDrafts = drafts; state.questionCount = 0; state.editingWorksheet = null; state.editingHomework = null; state.editingSources = []; state.previewExercises = null; state.sourceMetadata = {};
   setHeader('Создать worksheet', 'Интерактивный рабочий лист для ученика.', 'Worksheet Builder');
-  el('content').innerHTML = `<section class="drafts-panel card"><div class="card-title"><h2>Существующие черновики</h2><span>${drafts.length}</span></div><div class="draft-list">${drafts.map((draft) => `<button class="draft-item" data-draft-id="${draft.id}" type="button"><strong>${escapeHtml(draft.title)}</strong><span>${escapeHtml(draft.focus || draft.level || 'Черновик')}</span><small>${formatDate(draft.updated, true)}</small></button>`).join('') || '<p class="muted">Черновиков пока нет.</p>'}</div></section><form id="worksheet-form" class="worksheet-builder card"><section class="builder-step"><span>Шаг 1</span><h2>Ученик</h2><select name="student"><option value="">Без привязки к ученику</option>${state.students.map((student) => `<option value="${student.id}">${escapeHtml(student.name)}</option>`).join('')}</select>${state.students.length ? '' : '<p class="muted">Ученики пока не добавлены.</p>'}</section>
+  el('content').innerHTML = `<section class="drafts-panel card"><div class="card-title"><h2>Existing drafts</h2><span id="draft-count">${drafts.length}</span></div><div class="draft-list">${drafts.map(draftListMarkup).join('') || '<p class="muted drafts-empty">Черновиков пока нет.</p>'}</div></section><form id="worksheet-form" class="worksheet-builder card"><section class="builder-step"><span>Шаг 1</span><h2>Ученик</h2><select name="student"><option value="">Без привязки к ученику</option>${state.students.map((student) => `<option value="${student.id}">${escapeHtml(student.name)}</option>`).join('')}</select>${state.students.length ? '' : '<p class="muted">Ученики пока не добавлены.</p>'}</section>
     <section class="builder-step"><span>Шаг 2</span><h2>Параметры worksheet</h2><div class="form-grid"><label class="full-field" for="work-goal">Что отработать<textarea id="work-goal" name="work_goal" rows="4" required placeholder="he/she + is/isn't, вопросы Is he...? Is she...? и adjectives big, small, happy, sad"></textarea></label><label>Название worksheet<input name="title" required placeholder="Present Simple"></label><label>Примерное время<input name="estimated_time" placeholder="20 минут"></label><label>Срок<input name="due_date" type="datetime-local"></label></div></section>
     <section class="builder-step"><span>Шаг 3</span><h2>Источники</h2><p class="muted">Можно одновременно выбрать несколько материалов и загрузить несколько файлов.</p><div class="source-picker"><div><strong>Из библиотеки</strong><div class="library-checklist">${materials.map((m) => `<label><input type="checkbox" name="library_sources" value="${m.id}"> ${escapeHtml(m.title)}</label>`).join('') || '<div class="materials-empty"><p class="muted">В библиотеке пока нет материалов. Сначала добавьте материал.</p><button id="go-materials" class="secondary-button" type="button">Перейти в материалы</button></div>'}</div></div><label>Страницы / сканы<input name="source_files" type="file" multiple accept="image/jpeg,image/png,application/pdf"></label></div><div id="selected-sources" class="selected-sources"><span class="muted">Источники не выбраны</span></div></section>
     <section class="agent-launch builder-agent"><div><h2>Создать worksheet в AI-агенте</h2><p class="muted">Агент создаст worksheet по выбранным параметрам и материалам. После сохранения черновик появится в TeacherHub.</p></div><div class="agent-actions"><button id="copy-agent-prompt" class="secondary-button" type="button">Скопировать промпт для агента</button><a class="secondary-button" href="https://chatgpt.com/g/g-6a7f6d14a6c4819199f2014e5a233cfc-teacherhub-worksheet-builder" target="_blank" rel="noopener noreferrer">Открыть AI-агента</a></div></section>
     <section id="review-section" class="builder-step"><span>Шаг 4</span><div class="questions-heading"><div><h2>Упражнения</h2><p class="muted">Проверьте готовый worksheet перед публикацией.</p></div><button id="add-exercise" class="secondary-button" type="button">+ Добавить упражнение вручную</button></div><div class="review-toolbar"><button id="preview-worksheet" class="secondary-button" type="button">Предпросмотр как ученик</button></div><div id="exercise-list"></div></section>
     <p id="worksheet-error" class="form-error"></p><div id="publish-actions" class="homework-actions"><button class="secondary-button" data-status="draft" type="submit">Сохранить черновик</button><button class="primary-button" data-status="published" type="submit">Опубликовать</button><button id="cancel-worksheet" class="secondary-button" type="button">Отмена</button></div></form><dialog id="worksheet-preview-dialog" class="preview-dialog"><div id="worksheet-preview-content"></div><button id="close-preview" class="secondary-button" type="button">Закрыть предпросмотр</button></dialog>`;
   document.querySelectorAll('[name="library_sources"]').forEach((checkbox) => checkbox.addEventListener('change', updateSelectedSources));
-  document.querySelectorAll('.draft-item').forEach((button) => button.addEventListener('click', () => openWorksheetDraft(button.dataset.draftId)));
+  document.querySelectorAll('.open-draft').forEach((button) => button.addEventListener('click', () => openWorksheetDraft(button.dataset.draftId)));
+  document.querySelectorAll('.delete-draft').forEach((button) => button.addEventListener('click', () => deleteWorksheetDraft(button.dataset.draftId)));
   el('go-materials')?.addEventListener('click', () => navigate('materials'));
   el('worksheet-form').elements.source_files.addEventListener('change', updateSelectedSources);
   el('copy-agent-prompt').addEventListener('click', copyAgentPrompt);
@@ -348,6 +350,22 @@ async function renderWorksheetBuilder(navigationId = state.navigationId) {
   el('preview-worksheet').addEventListener('click', showBuilderPreview); el('close-preview').addEventListener('click', () => el('worksheet-preview-dialog').close());
   if (state.pendingWorksheetStudentId) { el('worksheet-form').elements.student.value = state.pendingWorksheetStudentId; state.pendingWorksheetStudentId = null; }
   renderExerciseEmptyState();
+}
+
+function draftListMarkup(draft) { const student = state.students.find((item) => item.id === draft.student); return `<article class="draft-item" data-draft-id="${draft.id}"><div class="draft-copy"><strong>${escapeHtml(draft.title || 'Без названия')}</strong><span>${escapeHtml(draft.focus || draft.instructions || 'Черновик')}</span>${student ? `<small>${escapeHtml(student.name)}</small>` : ''}<small>Worksheet ID: ${escapeHtml(draft.id)}</small></div><div class="draft-actions"><button class="secondary-button open-draft" data-draft-id="${draft.id}" type="button">Open</button><button class="danger-button delete-draft" data-draft-id="${draft.id}" type="button" aria-label="Удалить ${escapeAttr(draft.title || 'черновик')}">Delete</button></div></article>`; }
+
+async function deleteWorksheetDraft(id) {
+  if (!window.confirm('Удалить этот черновик?\nЭто действие нельзя отменить.')) return;
+  setLoading(true);
+  try {
+    await pb.send(`/api/teacherhub/worksheet-drafts/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    state.builderDrafts = state.builderDrafts.filter((draft) => draft.id !== id);
+    document.querySelector(`.draft-item[data-draft-id="${id}"]`)?.remove();
+    el('draft-count').textContent = state.builderDrafts.length;
+    const list = document.querySelector('.draft-list'); if (!state.builderDrafts.length) list.innerHTML = '<p class="muted drafts-empty">Черновиков пока нет.</p>';
+    toast('Черновик удалён');
+    if (state.editingWorksheet?.id === id) await renderWorksheetBuilder();
+  } catch (error) { console.error(error); toast(error?.response?.error || error?.message || 'Не удалось удалить черновик'); } finally { setLoading(false); }
 }
 
 function renderExerciseEmptyState() { const list = el('exercise-list'); if (list && !list.querySelector('.exercise-editor')) list.innerHTML = '<div class="exercise-empty empty-state">Упражнения появятся здесь после создания worksheet в AI-агенте.</div>'; }
@@ -486,6 +504,7 @@ function showBuilderPreview() { const nodes = [...document.querySelectorAll('.ex
 function worksheetDataFromForm(status = 'draft') { const form = el('worksheet-form'), due = form.elements.due_date.value, workGoal = form.elements.work_goal.value.trim(); return { student: form.elements.student.value, title: form.elements.title.value.trim(), instructions: workGoal, focus: workGoal, estimated_time: form.elements.estimated_time.value.trim(), status, due_date: due ? new Date(due).toISOString() : '', created_by: pb.authStore.record.id }; }
 async function syncWorksheetSources(worksheetId) {
   const form = el('worksheet-form'); rememberSourceMetadata(); const selectedMaterials = [...form.querySelectorAll('[name="library_sources"]:checked')].map((input) => input.value), existingLibrarySources = (state.editingSources || []).filter((source) => source.source_type === 'library');
+  if ([...form.elements.source_files.files].some((file) => file.size > SOURCE_UPLOAD_LIMIT)) throw new Error('Максимальный размер одного source-файла — 100 МБ');
   for (const source of existingLibrarySources) { if (!selectedMaterials.includes(source.material)) await pb.collection('worksheet_sources').delete(source.id); else await pb.collection('worksheet_sources').update(source.id, { metadata: state.sourceMetadata[`library-${source.material}`] || {} }); }
   for (const source of (state.editingSources || []).filter((item) => item.source_type === 'upload')) await pb.collection('worksheet_sources').update(source.id, { metadata: state.sourceMetadata[`saved-${source.id}`] || {} });
   let sourceOrder = (state.editingSources || []).filter((source) => source.source_type === 'upload').length;
