@@ -14,6 +14,8 @@ const skills = [
 document.addEventListener('DOMContentLoaded', () => {
   el('login-form').addEventListener('submit', login);
   el('logout-button').addEventListener('click', logout);
+  window.addEventListener('focus', refreshCurrentActionDraft);
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') refreshCurrentActionDraft(); });
   if (pb.authStore.isValid) enterApp().catch(handleFatal); else showLogin();
 });
 
@@ -177,9 +179,25 @@ function renderTeacher() {
   el('content').innerHTML = `<section class="card table-card"><div class="card-title"><h2>Ученики</h2><button id="add-student" class="primary-button" type="button">+ Добавить ученика</button></div><table class="student-table"><thead><tr><th>Ученик</th><th>Текущая тема</th><th>Прогресс</th><th>Действия</th><th>Текущее ДЗ</th><th>Последний результат</th></tr></thead><tbody>${state.students.map((student) => {
     const progress = d.progress.find((x) => x.student === student.id); const homeworks = d.homework.filter((x) => x.student === student.id); const result = d.results.find((x) => x.student === student.id);
     const isEditing = state.editingStudentId === student.id;
-    return `<tr data-student-row="${student.id}"><td><strong>${escapeHtml(student.name)}</strong><div class="muted">${escapeHtml(student.course || 'English')} · ${escapeHtml(student.level || '—')}</div></td><td>${escapeHtml(student.current_topic || '—')}</td><td>${isEditing ? progressEditor(progress) : teacherProgressMarkup(progress)}</td><td>${isEditing ? `<div class="edit-actions"><button class="primary-button save-progress" data-student-id="${student.id}" type="button">Сохранить</button><button class="secondary-button cancel-progress" type="button">Отмена</button></div>` : `<div class="row-actions"><button class="secondary-button edit-progress" data-student-id="${student.id}" type="button">Изменить прогресс</button></div>`}</td><td>${homeworks.length ? `<div class="teacher-homework-list">${homeworks.map((homework) => `<article><button class="teacher-homework-link" data-homework-id="${homework.id}" type="button">${escapeHtml(homework.title)}</button><div class="homework-preview-actions"><span class="muted">до ${formatDate(homework.due_date)} · ${escapeHtml(homework.status)}</span><button class="secondary-button open-teacher-homework" data-homework-id="${homework.id}" type="button">Открыть</button></div></article>`).join('')}</div>` : '—'}</td><td>${result ? teacherResultMarkup(result) : '—'}</td></tr>`;
+    return `<tr data-student-row="${student.id}"><td><strong>${escapeHtml(student.name)}</strong><div class="muted">${escapeHtml(student.course || 'English')} · ${escapeHtml(student.level || '—')}</div></td><td>${escapeHtml(student.current_topic || '—')}</td><td>${isEditing ? progressEditor(progress) : teacherProgressMarkup(progress)}</td><td>${isEditing ? `<div class="edit-actions"><button class="primary-button save-progress" data-student-id="${student.id}" type="button">Сохранить</button><button class="secondary-button cancel-progress" type="button">Отмена</button></div>` : `<div class="row-actions"><button class="secondary-button edit-progress" data-student-id="${student.id}" type="button">Изменить прогресс</button></div>`}</td><td>${homeworks.length ? `<div class="teacher-homework-list">${homeworks.map((homework) => `<article><button class="teacher-homework-link" data-homework-id="${homework.id}" type="button">${escapeHtml(homework.title)}</button><div class="homework-preview-actions"><span class="muted">до ${formatDate(homework.due_date)} · ${escapeHtml(homework.status)}</span><button class="secondary-button open-teacher-homework" data-homework-id="${homework.id}" type="button">Открыть</button><button class="danger-button delete-homework" data-homework-id="${homework.id}" type="button">Удалить</button></div></article>`).join('')}</div>` : '—'}</td><td>${result ? teacherResultMarkup(result) : '—'}</td></tr>`;
   }).join('') || '<tr><td colspan="6" class="empty-state">Ученики пока не добавлены.</td></tr>'}</tbody></table></section><dialog id="student-dialog"><form id="student-form" class="dialog-form"><div><p class="eyebrow">Новый ученик</p><h2>Добавить ученика</h2></div><label>Имя<input name="name" maxlength="120" autocomplete="off" required></label><p id="student-form-error" class="form-error" role="alert"></p><div class="homework-actions"><button class="primary-button" type="submit">Сохранить</button><button id="cancel-student" class="secondary-button" type="button">Отмена</button></div></form></dialog><dialog id="teacher-worksheet-preview" class="preview-dialog"><div id="teacher-worksheet-preview-content"></div><button id="close-teacher-worksheet-preview" class="secondary-button" type="button">Закрыть предпросмотр</button></dialog>`;
-  bindTeacherProgressControls(); document.querySelectorAll('.teacher-homework-link, .open-teacher-homework').forEach((button) => button.addEventListener('click', () => openTeacherHomeworkPreview(button.dataset.homeworkId))); el('add-student').addEventListener('click', () => el('student-dialog').showModal()); el('cancel-student').addEventListener('click', () => el('student-dialog').close()); el('student-form').addEventListener('submit', saveStudent); el('close-teacher-worksheet-preview').addEventListener('click', () => el('teacher-worksheet-preview').close()); animateBars();
+  bindTeacherProgressControls(); document.querySelectorAll('.teacher-homework-link, .open-teacher-homework').forEach((button) => button.addEventListener('click', () => openTeacherHomeworkPreview(button.dataset.homeworkId))); document.querySelectorAll('.delete-homework').forEach((button) => button.addEventListener('click', () => deleteStudentHomework(button.dataset.homeworkId))); el('add-student').addEventListener('click', () => el('student-dialog').showModal()); el('cancel-student').addEventListener('click', () => el('student-dialog').close()); el('student-form').addEventListener('submit', saveStudent); el('close-teacher-worksheet-preview').addEventListener('click', () => el('teacher-worksheet-preview').close()); animateBars();
+}
+
+async function deleteStudentHomework(homeworkId) {
+  const homework = state.teacherData.homework.find((item) => item.id === homeworkId);
+  if (!homework || !window.confirm(`Удалить homework «${homework.title}»? Worksheet и упражнения останутся.`)) return;
+  setLoading(true);
+  try {
+    const [results, tasks] = await Promise.all([
+      pb.collection('homework_results').getList(1, 1, { filter: `homework="${homeworkId}"`, requestKey: null }),
+      pb.collection('homework_tasks').getList(1, 1, { filter: `homework="${homeworkId}"`, requestKey: null }),
+    ]);
+    if (results.totalItems) { toast('Удаление остановлено: у homework есть результаты ученика.'); return; }
+    if (tasks.totalItems) { toast('Удаление остановлено: у homework есть связанные задания старого формата.'); return; }
+    await pb.collection('homework').delete(homeworkId);
+    state.teacherData.homework = state.teacherData.homework.filter((item) => item.id !== homeworkId); renderTeacher(); toast('Homework удалено. Worksheet сохранён.');
+  } catch (error) { handleFatal(error); } finally { setLoading(false); }
 }
 
 async function openTeacherHomeworkPreview(homeworkId) {
@@ -366,7 +384,7 @@ async function renderWorksheetBuilder(navigationId = state.navigationId) {
     <section class="builder-step"><span>Шаг 2</span><h2>Параметры worksheet</h2><div class="form-grid"><label class="full-field" for="work-goal">Что отработать<textarea id="work-goal" name="work_goal" rows="4" required placeholder="he/she + is/isn't, вопросы Is he...? Is she...? и adjectives big, small, happy, sad"></textarea></label><label class="full-field">Вводный текст для ученика<textarea name="intro_text" rows="7" placeholder="Read first.&#10;&#10;Jack:&#10;I am small."></textarea></label><label for="worksheet-title">Название worksheet<input id="worksheet-title" name="worksheet_title" required placeholder="Present Simple"></label><label>Примерное время<input name="estimated_time" placeholder="20 минут"></label><label>Срок<input name="due_date" type="datetime-local"></label></div></section>
     <section class="builder-step"><span>Шаг 3</span><h2>Источники</h2><p class="muted">Можно одновременно выбрать несколько материалов и загрузить несколько файлов.</p><div class="source-picker"><div><strong>Из библиотеки</strong><div class="library-checklist">${materials.map((m) => `<label><input type="checkbox" name="library_sources" value="${m.id}"> ${escapeHtml(m.title)}</label>`).join('') || '<div class="materials-empty"><p class="muted">В библиотеке пока нет материалов. Сначала добавьте материал.</p><button id="go-materials" class="secondary-button" type="button">Перейти в материалы</button></div>'}</div></div><label>Страницы / сканы<input name="source_files" type="file" multiple accept="image/jpeg,image/png,application/pdf"></label></div><div id="selected-sources" class="selected-sources"><span class="muted">Источники не выбраны</span></div></section>
     <section class="agent-launch builder-agent"><div><h2>Создать worksheet в AI-агенте</h2><p class="muted">Агент создаст worksheet по выбранным параметрам и материалам. После сохранения черновик появится в TeacherHub.</p></div><div class="agent-actions"><button id="copy-agent-prompt" class="secondary-button" type="button">Скопировать промпт для агента</button><a class="secondary-button" href="https://chatgpt.com/g/g-6a7f6d14a6c4819199f2014e5a233cfc-teacherhub-worksheet-builder" target="_blank" rel="noopener noreferrer">Открыть AI-агента</a></div></section>
-    <section id="review-section" class="builder-step"><span>Шаг 4</span><div class="questions-heading"><div><h2>Упражнения</h2><p class="muted">Проверьте готовый worksheet перед публикацией.</p></div><button id="add-exercise" class="secondary-button" type="button">+ Добавить упражнение вручную</button></div><div class="review-toolbar"><button id="preview-worksheet" class="secondary-button" type="button">Предпросмотр как ученик</button></div><div id="exercise-list"></div></section>
+    <section id="review-section" class="builder-step"><span>Шаг 4</span><div class="questions-heading"><div><h2>Упражнения</h2><p class="muted">Проверьте готовый worksheet перед публикацией.</p></div><button id="add-exercise" class="secondary-button" type="button">+ Добавить упражнение вручную</button></div><div class="review-toolbar"><button id="refresh-action-draft" class="secondary-button" type="button">Обновить draft</button><button id="preview-worksheet" class="secondary-button" type="button">Предпросмотр как ученик</button><strong id="draft-sync-status" class="draft-sync-status"></strong></div><div id="exercise-list"></div></section>
     <p id="worksheet-error" class="form-error"></p><div id="publish-actions" class="homework-actions"><button class="secondary-button" data-status="draft" type="submit">Сохранить черновик</button><button class="primary-button" data-status="published" type="submit">Опубликовать</button><button id="cancel-worksheet" class="secondary-button" type="button">Отмена</button></div><div id="publish-result" class="publish-result" aria-live="polite"></div></form><dialog id="worksheet-preview-dialog" class="preview-dialog"><div id="worksheet-preview-content"></div><button id="close-preview" class="secondary-button" type="button">Закрыть предпросмотр</button></dialog>`;
   document.querySelectorAll('[name="library_sources"]').forEach((checkbox) => checkbox.addEventListener('change', updateSelectedSources));
   document.querySelectorAll('.open-draft').forEach((button) => button.addEventListener('click', () => openWorksheetDraft(button.dataset.draftId)));
@@ -374,6 +392,7 @@ async function renderWorksheetBuilder(navigationId = state.navigationId) {
   el('go-materials')?.addEventListener('click', () => navigate('materials'));
   el('worksheet-form').elements.source_files.addEventListener('change', updateSelectedSources);
   el('copy-agent-prompt').addEventListener('click', copyAgentPrompt);
+  el('refresh-action-draft').addEventListener('click', () => refreshCurrentActionDraft(true));
   el('add-exercise').addEventListener('click', () => addWorksheetExercise(null, true)); el('cancel-worksheet').addEventListener('click', () => navigate('home')); el('worksheet-form').addEventListener('submit', saveWorksheet);
   el('preview-worksheet').addEventListener('click', showBuilderPreview); el('close-preview').addEventListener('click', () => el('worksheet-preview-dialog').close());
   if (state.pendingWorksheetStudentId) { el('worksheet-form').elements.student.value = state.pendingWorksheetStudentId; state.pendingWorksheetStudentId = null; }
@@ -465,10 +484,10 @@ function normalizeDraftExercise(record) {
 }
 function datetimeLocalValue(value) { if (!value) return ''; const date = new Date(value); if (Number.isNaN(date.getTime())) return ''; const offset = date.getTimezoneOffset() * 60000; return new Date(date.getTime() - offset).toISOString().slice(0, 16); }
 
-async function openWorksheetDraft(id) {
+async function openWorksheetDraft(id, freshDraft = null) {
   setLoading(true);
   try {
-    const draft = state.builderDrafts.find((item) => item.id === id) || await pb.collection('worksheets').getOne(id, { requestKey: null });
+    const draft = freshDraft || state.builderDrafts.find((item) => item.id === id) || await pb.collection('worksheets').getOne(id, { requestKey: null });
     const [exerciseRecords, sources, homeworkResult] = await Promise.all([
       pb.collection('worksheet_exercises').getFullList({ filter: `worksheet="${id}"`, sort: 'order', requestKey: null }),
       pb.collection('worksheet_sources').getFullList({ filter: `worksheet="${id}"`, sort: 'order', requestKey: null }),
@@ -482,15 +501,31 @@ async function openWorksheetDraft(id) {
   } catch (error) { handleFatal(error); } finally { setLoading(false); }
 }
 
+async function refreshCurrentActionDraft(manual = false) {
+  if (state.role !== 'teacher' || state.route !== 'worksheet-builder' || !state.editingWorksheet?.id || state.draftRefreshRunning) return;
+  state.draftRefreshRunning = true;
+  try {
+    const currentId = state.editingWorksheet.id;
+    const fresh = await pb.collection('worksheets').getOne(currentId, { requestKey: null });
+    if (fresh.status !== 'draft') return;
+    const changed = fresh.updated !== state.editingWorksheet.updated;
+    if (!changed && !manual) return;
+    const draftIndex = state.builderDrafts.findIndex((item) => item.id === currentId); if (draftIndex >= 0) state.builderDrafts[draftIndex] = fresh; else state.builderDrafts.unshift(fresh);
+    await openWorksheetDraft(currentId, fresh);
+    const status = el('draft-sync-status'); if (status) status.textContent = 'Draft получен из TeacherHub';
+    toast(changed ? 'Draft получен из TeacherHub' : 'Draft уже актуален');
+  } catch (error) { if (manual) handleFatal(error); else console.warn('Draft refresh is unavailable:', error); } finally { state.draftRefreshRunning = false; }
+}
+
 function addWorksheetExercise(exercise = null, manual = false) {
   if (!exercise && !manual) { renderExerciseEmptyState(); return; }
   el('exercise-list').querySelector('.exercise-empty')?.remove();
   const index = state.questionCount++; const node = document.createElement('section'); node.className = 'exercise-editor'; node.dataset.exerciseIndex = index;
-  node.innerHTML = `<div class="question-editor-head"><strong>Блок ${index + 1}</strong><div><button class="edit-exercise" type="button">Редактировать</button><button class="move-exercise" data-direction="up" type="button">↑</button><button class="move-exercise" data-direction="down" type="button">↓</button><button class="remove-question" type="button">Удалить</button></div></div><div class="exercise-summary"></div><div class="exercise-edit-fields"><label>Тип<select name="type"><optgroup label="Проверяемые упражнения"><option value="multiple_choice">Multiple choice</option><option value="text_input">Text input</option><option value="reorder_words">Reorder words</option><option value="matching">Matching</option><option value="dropdown">Dropdown</option><option value="drag_drop">Drag & Drop</option></optgroup><optgroup label="Ответ преподавателю"><option value="open_text_teacher_review">Open text — teacher review</option></optgroup><optgroup label="Контент"><option value="video_embed">Video embed</option><option value="embed">Generic embed</option></optgroup></select></label><label class="block-title hidden">Заголовок (необязательно)<input name="title"></label><label>Инструкция / вопрос<textarea name="instruction" rows="2" required></textarea></label><div class="exercise-fields"></div><label class="points-field">Баллы<input name="points" type="number" min="1" value="1"></label><button class="primary-button finish-edit" type="button">Готово</button></div>`;
+  node.innerHTML = `<div class="question-editor-head"><strong>Блок ${index + 1}</strong><div><button class="move-exercise" data-direction="up" type="button">↑</button><button class="move-exercise" data-direction="down" type="button">↓</button><button class="remove-question" type="button">Удалить</button></div></div><div class="exercise-summary"></div><div class="exercise-edit-fields"><label>Тип<select name="type"><optgroup label="Проверяемые упражнения"><option value="multiple_choice">Multiple choice</option><option value="text_input">Text input</option><option value="reorder_words">Reorder words</option><option value="matching">Matching</option><option value="dropdown">Dropdown</option><option value="drag_drop">Drag & Drop</option></optgroup><optgroup label="Ответ преподавателю"><option value="open_text_teacher_review">Open text — teacher review</option></optgroup><optgroup label="Контент"><option value="video_embed">Video embed</option><option value="embed">Generic embed</option></optgroup></select></label><label class="block-title hidden">Заголовок (необязательно)<input name="title"></label><label>Инструкция / вопрос<textarea name="instruction" rows="2" required></textarea></label><div class="exercise-fields"></div><label class="points-field">Баллы<input name="points" type="number" min="1" value="1"></label><button class="primary-button finish-edit" type="button">Готово</button></div>`;
   el('exercise-list').appendChild(node); renderExerciseFields(node, 'multiple_choice');
   node.querySelector('[name="type"]').addEventListener('change', (e) => renderExerciseFields(node, e.target.value)); node.querySelector('.remove-question').addEventListener('click', () => { node.remove(); renderExerciseEmptyState(); });
   node.querySelectorAll('.move-exercise').forEach((button) => button.addEventListener('click', () => moveExercise(node, button.dataset.direction)));
-  node.querySelector('.edit-exercise').addEventListener('click', () => { node.dataset.dirty = 'true'; node.classList.add('editing'); }); node.querySelector('.finish-edit').addEventListener('click', () => { node.classList.remove('editing'); updateExerciseSummary(node); });
+  node.querySelector('.finish-edit').addEventListener('click', () => { node.classList.remove('editing'); updateExerciseSummary(node); });
   if (exercise) fillExerciseEditor(node, exercise); else { node.dataset.dirty = 'true'; node.classList.add('editing'); } updateExerciseSummary(node);
 }
 
