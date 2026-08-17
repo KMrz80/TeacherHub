@@ -413,20 +413,25 @@ function buildAgentPrompt() {
   ];
   values.forEach(([label, value]) => { if (value) lines.push(`${label}: ${value}`); });
   rememberSourceMetadata();
-  const sources = [...form.querySelectorAll('.source-metadata')].map((source, index) => { const metadata = sourceMetadataFromRow(source), details = [`SOURCE ${index + 1}`, `Material: ${source.dataset.sourceLabel}`]; metadata.page_selections.forEach((selection) => { details.push(`Page ${selection.page}:`); if (selection.exercises) details.push(`Exercises: ${selection.exercises}`); }); if (metadata.unit) details.push(`Unit / section: ${metadata.unit}`); if (metadata.teacher_note) details.push(`Teacher note: ${metadata.teacher_note}`); return details.join('\n'); });
+  const sources = [...form.querySelectorAll('.source-metadata')].map((source) => { const metadata = sourceMetadataFromRow(source), details = ['SOURCE:', `Material: ${source.dataset.sourceLabel}`]; metadata.page_selections.forEach((selection) => { details.push(`Page: ${selection.page}`); if (selection.exercises) details.push(`Exercises: ${selection.exercises}`); }); return details.join('\n'); });
   if (sources.length) lines.push(sources.join('\n\n'));
   lines.unshift('Создай интерактивный worksheet для TeacherHub.');
-  lines.push(`ВАЖНО:
-сначала вызови getWorksheetSources для этого Worksheet ID
-и получи реальные выбранные материалы из TeacherHub.
+  lines.push(`Используй точное Page Description этого material + page из Knowledge.
 
-Не ищи эти страницы в Knowledge и не проси меня загружать их повторно.
+Если указаны конкретные exercises — используй только их.
+Не используй соседние страницы или похожие упражнения.
+Соблюдай TEXT FACTS, VISUALS, EXPLICIT LINKS и DO NOT INFER.
 
-Проанализируй реальные source-файлы и используй только указанные страницы и упражнения.
+Если exact Page Description в Knowledge отсутствует — скажи об этом и не придумывай содержание.
 
-После анализа создай INTERACTIVE WORKSHEET DRAFT + Teacher Key + QA.
+Если исходное упражнение зависит от изображения, которое нельзя показать ученику, перепроектируй его так, чтобы Student Version работала без технического описания картинки, либо не используй этот item.
 
-Не сохраняй его в TeacherHub до моего подтверждения.`);
+Создай:
+INTERACTIVE WORKSHEET DRAFT
++ Teacher Key
++ QA.
+
+Не сохраняй worksheet в TeacherHub до подтверждения преподавателя.`);
   return lines.join('\n\n');
 }
 async function copyAgentPrompt() {
