@@ -5,7 +5,7 @@ const pb = new PocketBase(PB_URL);
 const SOURCE_UPLOAD_LIMIT = 100 * 1024 * 1024;
 
 const el = (id) => document.getElementById(id);
-const state = { role: '', route: 'home', navigationId: 0, students: [], student: null, progress: null, homework: null, tasks: [], result: null, editingStudentId: null, homeworkStudentId: null, pendingWorksheetStudentId: null, questionCount: 0 };
+const state = { role: '', route: 'home', navigationId: 0, students: [], student: null, progress: null, homework: null, homeworks: [], tasks: [], result: null, editingStudentId: null, homeworkStudentId: null, pendingWorksheetStudentId: null, questionCount: 0 };
 const skills = [
   ['vocabulary', 'Vocabulary', 'V'], ['grammar', 'Grammar', 'G'], ['reading', 'Reading', 'R'],
   ['listening', 'Listening', 'L'], ['speaking', 'Speaking', 'S'],
@@ -36,7 +36,7 @@ async function enterApp() {
 }
 
 function showLogin() { el('login-view').classList.remove('hidden'); el('workspace').classList.add('hidden'); }
-function logout() { pb.authStore.clear(); Object.assign(state, { role: '', route: 'home', students: [], student: null, progress: null, homework: null, tasks: [], result: null }); showLogin(); }
+function logout() { pb.authStore.clear(); Object.assign(state, { role: '', route: 'home', students: [], student: null, progress: null, homework: null, homeworks: [], tasks: [], result: null }); showLogin(); }
 
 function renderShell() {
   const parentItems = [['home', '⌂', 'Главная'], ['homework', '▤', 'Домашнее задание'], ['progress', '⌁', 'Прогресс']];
@@ -70,7 +70,7 @@ async function loadParentData() {
   state.student = await pb.collection('students').getFirstListItem('', { requestKey: null });
   const [progressResult, homeworkResult, resultsResult] = await Promise.allSettled([
     pb.collection('progress').getFirstListItem(`student="${state.student.id}"`, { requestKey: null }),
-    pb.collection('homework').getList(1, 1, {
+    pb.collection('homework').getFullList({
       filter: `student="${state.student.id}" && status="published"`,
       sort: '-due_date',
       expand: 'worksheet',
@@ -85,7 +85,8 @@ async function loadParentData() {
   ]);
 
   state.progress = progressResult.status === 'fulfilled' ? progressResult.value : null;
-  state.homework = homeworkResult.status === 'fulfilled' ? homeworkResult.value.items[0] || null : null;
+  state.homeworks = homeworkResult.status === 'fulfilled' ? homeworkResult.value : [];
+  state.homework = state.homeworks[0] || null;
   state.result = resultsResult.status === 'fulfilled' ? resultsResult.value.items[0] || null : null;
 
   if (progressResult.status === 'rejected') console.warn('Progress is unavailable:', progressResult.reason);
@@ -118,8 +119,9 @@ function renderParentHome() {
 }
 
 function homeworkCard() {
-  if (!state.homework) return '<section class="card homework-card"><div class="card-title"><div class="icon-box">✓</div><h2>Текущее ДЗ</h2></div><div class="empty-state">Пока нет домашнего задания</div></section>';
-  return `<section class="card homework-card"><div class="card-title"><div class="icon-box">▤</div><h2>Текущее ДЗ</h2></div><h3 class="homework-title">${escapeHtml(state.homework.title)}</h3>${state.homework.instructions ? `<p class="homework-instructions">${escapeHtml(state.homework.instructions)}</p>` : ''}<p class="muted">Срок: ${formatDate(state.homework.due_date, true)}</p><button class="primary-button open-homework" type="button">Открыть задание &nbsp;→</button></section>`;
+  const homeworks = state.homeworks || [];
+  if (!homeworks.length) return '<section class="card homework-card"><div class="card-title"><div class="icon-box">✓</div><h2>Домашние задания</h2></div><div class="empty-state">Пока нет домашнего задания</div></section>';
+  return `<section class="card homework-card"><div class="card-title"><div class="icon-box">▤</div><h2>Домашние задания</h2></div><div class="homework-list">${homeworks.map((homework) => `<article class="homework-list-item"><div><h3 class="homework-title">${escapeHtml(homework.title)}</h3>${homework.instructions ? `<p class="homework-instructions">${escapeHtml(homework.instructions)}</p>` : ''}<p class="muted">Срок: ${formatDate(homework.due_date, true)} · Опубликовано</p></div><button class="primary-button open-homework" data-homework-id="${homework.id}" type="button">Открыть &nbsp;→</button></article>`).join('')}</div></section>`;
 }
 
 function renderHomeworkOverview() {
@@ -173,9 +175,9 @@ function renderTeacher() {
   setHeader('Ученики', 'Прогресс, текущее задание и последние результаты.', 'Teacher view');
   const d = state.teacherData;
   el('content').innerHTML = `<section class="card table-card"><div class="card-title"><h2>Ученики</h2><button id="add-student" class="primary-button" type="button">+ Добавить ученика</button></div><table class="student-table"><thead><tr><th>Ученик</th><th>Текущая тема</th><th>Прогресс</th><th>Действия</th><th>Текущее ДЗ</th><th>Последний результат</th></tr></thead><tbody>${state.students.map((student) => {
-    const progress = d.progress.find((x) => x.student === student.id); const homework = d.homework.find((x) => x.student === student.id); const result = d.results.find((x) => x.student === student.id);
+    const progress = d.progress.find((x) => x.student === student.id); const homeworks = d.homework.filter((x) => x.student === student.id); const result = d.results.find((x) => x.student === student.id);
     const isEditing = state.editingStudentId === student.id;
-    return `<tr data-student-row="${student.id}"><td><strong>${escapeHtml(student.name)}</strong><div class="muted">${escapeHtml(student.course || 'English')} · ${escapeHtml(student.level || '—')}</div></td><td>${escapeHtml(student.current_topic || '—')}</td><td>${isEditing ? progressEditor(progress) : teacherProgressMarkup(progress)}</td><td>${isEditing ? `<div class="edit-actions"><button class="primary-button save-progress" data-student-id="${student.id}" type="button">Сохранить</button><button class="secondary-button cancel-progress" type="button">Отмена</button></div>` : `<div class="row-actions"><button class="secondary-button edit-progress" data-student-id="${student.id}" type="button">Изменить прогресс</button></div>`}</td><td>${homework ? `<button class="teacher-homework-link" data-homework-id="${homework.id}" type="button">${escapeHtml(homework.title)}</button><div class="homework-preview-actions"><span class="muted">до ${formatDate(homework.due_date)}</span><button class="secondary-button open-teacher-homework" data-homework-id="${homework.id}" type="button">Открыть</button></div>` : '—'}</td><td>${result ? teacherResultMarkup(result) : '—'}</td></tr>`;
+    return `<tr data-student-row="${student.id}"><td><strong>${escapeHtml(student.name)}</strong><div class="muted">${escapeHtml(student.course || 'English')} · ${escapeHtml(student.level || '—')}</div></td><td>${escapeHtml(student.current_topic || '—')}</td><td>${isEditing ? progressEditor(progress) : teacherProgressMarkup(progress)}</td><td>${isEditing ? `<div class="edit-actions"><button class="primary-button save-progress" data-student-id="${student.id}" type="button">Сохранить</button><button class="secondary-button cancel-progress" type="button">Отмена</button></div>` : `<div class="row-actions"><button class="secondary-button edit-progress" data-student-id="${student.id}" type="button">Изменить прогресс</button></div>`}</td><td>${homeworks.length ? `<div class="teacher-homework-list">${homeworks.map((homework) => `<article><button class="teacher-homework-link" data-homework-id="${homework.id}" type="button">${escapeHtml(homework.title)}</button><div class="homework-preview-actions"><span class="muted">до ${formatDate(homework.due_date)} · ${escapeHtml(homework.status)}</span><button class="secondary-button open-teacher-homework" data-homework-id="${homework.id}" type="button">Открыть</button></div></article>`).join('')}</div>` : '—'}</td><td>${result ? teacherResultMarkup(result) : '—'}</td></tr>`;
   }).join('') || '<tr><td colspan="6" class="empty-state">Ученики пока не добавлены.</td></tr>'}</tbody></table></section><dialog id="student-dialog"><form id="student-form" class="dialog-form"><div><p class="eyebrow">Новый ученик</p><h2>Добавить ученика</h2></div><label>Имя<input name="name" maxlength="120" autocomplete="off" required></label><p id="student-form-error" class="form-error" role="alert"></p><div class="homework-actions"><button class="primary-button" type="submit">Сохранить</button><button id="cancel-student" class="secondary-button" type="button">Отмена</button></div></form></dialog><dialog id="teacher-worksheet-preview" class="preview-dialog"><div id="teacher-worksheet-preview-content"></div><button id="close-teacher-worksheet-preview" class="secondary-button" type="button">Закрыть предпросмотр</button></dialog>`;
   bindTeacherProgressControls(); document.querySelectorAll('.teacher-homework-link, .open-teacher-homework').forEach((button) => button.addEventListener('click', () => openTeacherHomeworkPreview(button.dataset.homeworkId))); el('add-student').addEventListener('click', () => el('student-dialog').showModal()); el('cancel-student').addEventListener('click', () => el('student-dialog').close()); el('student-form').addEventListener('submit', saveStudent); el('close-teacher-worksheet-preview').addEventListener('click', () => el('teacher-worksheet-preview').close()); animateBars();
 }
@@ -192,6 +194,17 @@ async function openTeacherHomeworkPreview(homeworkId) {
     ]);
     if (worksheet.status !== 'published') { toast('Связанный worksheet ещё не опубликован.'); return; }
     const content = el('teacher-worksheet-preview-content'); content.innerHTML = worksheetPageMarkup(worksheet, exercises, true); bindWorksheetInteractions(content); el('teacher-worksheet-preview').showModal();
+  } catch (error) { handleFatal(error); } finally { setLoading(false); }
+}
+
+async function openBuilderPublishedPreview(worksheetId) {
+  setLoading(true);
+  try {
+    const [worksheet, exercises] = await Promise.all([
+      pb.collection('worksheets').getOne(worksheetId, { requestKey: null }),
+      pb.collection('worksheet_exercises').getFullList({ filter: `worksheet="${worksheetId}"`, sort: 'order', requestKey: null }),
+    ]);
+    const content = el('worksheet-preview-content'); content.innerHTML = worksheetPageMarkup(worksheet, exercises, true); bindWorksheetInteractions(content); el('worksheet-preview-dialog').showModal();
   } catch (error) { handleFatal(error); } finally { setLoading(false); }
 }
 
@@ -354,7 +367,7 @@ async function renderWorksheetBuilder(navigationId = state.navigationId) {
     <section class="builder-step"><span>Шаг 3</span><h2>Источники</h2><p class="muted">Можно одновременно выбрать несколько материалов и загрузить несколько файлов.</p><div class="source-picker"><div><strong>Из библиотеки</strong><div class="library-checklist">${materials.map((m) => `<label><input type="checkbox" name="library_sources" value="${m.id}"> ${escapeHtml(m.title)}</label>`).join('') || '<div class="materials-empty"><p class="muted">В библиотеке пока нет материалов. Сначала добавьте материал.</p><button id="go-materials" class="secondary-button" type="button">Перейти в материалы</button></div>'}</div></div><label>Страницы / сканы<input name="source_files" type="file" multiple accept="image/jpeg,image/png,application/pdf"></label></div><div id="selected-sources" class="selected-sources"><span class="muted">Источники не выбраны</span></div></section>
     <section class="agent-launch builder-agent"><div><h2>Создать worksheet в AI-агенте</h2><p class="muted">Агент создаст worksheet по выбранным параметрам и материалам. После сохранения черновик появится в TeacherHub.</p></div><div class="agent-actions"><button id="copy-agent-prompt" class="secondary-button" type="button">Скопировать промпт для агента</button><a class="secondary-button" href="https://chatgpt.com/g/g-6a7f6d14a6c4819199f2014e5a233cfc-teacherhub-worksheet-builder" target="_blank" rel="noopener noreferrer">Открыть AI-агента</a></div></section>
     <section id="review-section" class="builder-step"><span>Шаг 4</span><div class="questions-heading"><div><h2>Упражнения</h2><p class="muted">Проверьте готовый worksheet перед публикацией.</p></div><button id="add-exercise" class="secondary-button" type="button">+ Добавить упражнение вручную</button></div><div class="review-toolbar"><button id="preview-worksheet" class="secondary-button" type="button">Предпросмотр как ученик</button></div><div id="exercise-list"></div></section>
-    <p id="worksheet-error" class="form-error"></p><div id="publish-actions" class="homework-actions"><button class="secondary-button" data-status="draft" type="submit">Сохранить черновик</button><button class="primary-button" data-status="published" type="submit">Опубликовать</button><button id="cancel-worksheet" class="secondary-button" type="button">Отмена</button></div></form><dialog id="worksheet-preview-dialog" class="preview-dialog"><div id="worksheet-preview-content"></div><button id="close-preview" class="secondary-button" type="button">Закрыть предпросмотр</button></dialog>`;
+    <p id="worksheet-error" class="form-error"></p><div id="publish-actions" class="homework-actions"><button class="secondary-button" data-status="draft" type="submit">Сохранить черновик</button><button class="primary-button" data-status="published" type="submit">Опубликовать</button><button id="cancel-worksheet" class="secondary-button" type="button">Отмена</button></div><div id="publish-result" class="publish-result" aria-live="polite"></div></form><dialog id="worksheet-preview-dialog" class="preview-dialog"><div id="worksheet-preview-content"></div><button id="close-preview" class="secondary-button" type="button">Закрыть предпросмотр</button></dialog>`;
   document.querySelectorAll('[name="library_sources"]').forEach((checkbox) => checkbox.addEventListener('change', updateSelectedSources));
   document.querySelectorAll('.open-draft').forEach((button) => button.addEventListener('click', () => openWorksheetDraft(button.dataset.draftId)));
   document.querySelectorAll('.delete-draft').forEach((button) => button.addEventListener('click', () => deleteWorksheetDraft(button.dataset.draftId)));
@@ -391,7 +404,8 @@ function buildAgentPrompt() {
   const studentOption = form.elements.student.selectedOptions[0];
   const values = [
     ['Worksheet ID', state.editingWorksheet?.id || ''],
-    ['Ученик', form.elements.student.value ? studentOption?.textContent.trim() : ''],
+    ['Student', form.elements.student.value ? studentOption?.textContent.trim() : ''],
+    ['Student ID', form.elements.student.value],
     ['Название', worksheetTitleValue(form)],
     ['Что отработать', form.elements.work_goal.value.trim()],
     ['Время', form.elements.estimated_time.value.trim()],
@@ -567,7 +581,7 @@ async function saveWorksheet(event) {
     let homework = state.editingHomework;
     if (form.elements.student.value) { const homeworkData = { student: form.elements.student.value, title: worksheetTitleValue(form), instructions: form.elements.work_goal.value.trim(), due_date: worksheetData.due_date, status, created_by: pb.authStore.record.id, worksheet: worksheet.id }; homework = homework ? await pb.collection('homework').update(homework.id, homeworkData) : await pb.collection('homework').create(homeworkData); }
     state.editingWorksheet = worksheet; state.editingHomework = homework || null; state.editingExerciseIds = retainedExerciseIds; state.previewExercises = savedExercises;
-    if (status === 'published') { state.builderDrafts = state.builderDrafts.filter((draft) => draft.id !== worksheet.id); if (homework && !state.teacherData.homework.some((item) => item.id === homework.id)) state.teacherData.homework.unshift(homework); setHeader('Редактировать worksheet', 'Worksheet опубликован.', 'Published'); toast('Worksheet опубликован'); }
+    if (status === 'published') { state.builderDrafts = state.builderDrafts.filter((draft) => draft.id !== worksheet.id); if (homework) { const homeworkIndex = state.teacherData.homework.findIndex((item) => item.id === homework.id); if (homeworkIndex >= 0) state.teacherData.homework[homeworkIndex] = homework; else state.teacherData.homework.unshift(homework); } setHeader('Редактировать worksheet', 'Worksheet опубликован.', 'Published'); toast('Worksheet опубликован'); const result = el('publish-result'); result.innerHTML = `<strong>Worksheet опубликован</strong><button id="open-published-worksheet" class="secondary-button" type="button">Открыть опубликованный worksheet</button>`; el('open-published-worksheet').addEventListener('click', () => openBuilderPublishedPreview(worksheet.id)); }
     else { const existingIndex = state.builderDrafts.findIndex((draft) => draft.id === worksheet.id); if (existingIndex >= 0) state.builderDrafts[existingIndex] = worksheet; else state.builderDrafts.unshift(worksheet); setHeader('Редактировать worksheet', 'Черновик сохранён. Можно продолжить редактирование.', 'Draft'); toast('Черновик сохранён'); }
     refreshBuilderDraftList(); document.querySelectorAll('.draft-item').forEach((item) => item.classList.toggle('active', status === 'draft' && item.dataset.draftId === worksheet.id));
   } catch (error) { const message = error?.response?.message || error?.message || String(error); showError(message); console.error(error); } finally { setLoading(false); }
@@ -672,7 +686,7 @@ async function checkWorksheet(event) {
 function shuffle(items) { const copy = [...items]; for (let i = copy.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [copy[i], copy[j]] = [copy[j], copy[i]]; } return copy; }
 
 function skillsMarkup(progress) { return skills.map(([key, label, icon]) => { const value = Number(progress?.[key] || 0); return `<div class="skill-row"><span class="skill-icon ${key}">${icon}</span><span>${label}</span><div class="bar"><div class="bar-fill ${key}" data-width="${value}"></div></div><span class="value">${value}%</span></div>`; }).join(''); }
-function bindHomeworkButtons() { document.querySelectorAll('.open-homework').forEach((button) => button.addEventListener('click', () => navigate('task'))); }
+function bindHomeworkButtons() { document.querySelectorAll('.open-homework').forEach((button) => button.addEventListener('click', () => { const selected = (state.homeworks || []).find((homework) => homework.id === button.dataset.homeworkId); if (!selected) { toast('Домашнее задание не найдено.'); return; } state.homework = selected; navigate('task'); })); }
 function animateBars() { requestAnimationFrame(() => requestAnimationFrame(() => document.querySelectorAll('.bar-fill').forEach((bar) => { bar.style.width = `${Math.max(0, Math.min(100, Number(bar.dataset.width)))}%`; }))); }
 function average(progress) { return Math.round(skills.reduce((sum, [key]) => sum + Number(progress?.[key] || 0), 0) / skills.length); }
 function formatDate(value, time = false) { if (!value) return 'не указан'; const date = new Date(value.replace(' ', 'T')); return Number.isNaN(date.getTime()) ? value : new Intl.DateTimeFormat('ru-RU', { day: 'numeric', month: 'long', ...(time ? { hour: '2-digit', minute: '2-digit' } : {}) }).format(date); }
