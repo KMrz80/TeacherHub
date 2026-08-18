@@ -686,9 +686,20 @@ function exerciseDataError(exercise) {
   if (exercise.type === 'open_text_teacher_review' && !content.prompt) return `Exercise data is invalid: ${exercise.type}`;
   return '';
 }
+function logReorderRaw(exercise) {
+  if (exercise.type !== 'reorder_words') return;
+  console.log('[REORDER RAW]', { id: exercise.id, type: exercise.type, instruction: exercise.instruction, content: exercise.content, correct_answer: exercise.correct_answer });
+  let parsedContent = exercise.content;
+  if (typeof parsedContent === 'string') { try { parsedContent = JSON.parse(parsedContent); } catch (error) { console.error('[REORDER PARSE ERROR]', error); } }
+  console.log('[REORDER PARSED]', parsedContent);
+  console.log('[REORDER ITEMS IS ARRAY]', Array.isArray(parsedContent?.items));
+  console.log('[REORDER ITEMS]', parsedContent?.items);
+  if (Array.isArray(parsedContent?.items)) parsedContent.items.forEach((item, index) => console.log('[REORDER ITEM]', { index, words: item?.words, words_type: typeof item?.words, words_is_array: Array.isArray(item?.words), correct_answer: item?.correct_answer }));
+}
 
 function worksheetExerciseMarkup(exercise, index) {
   let answer = ''; const content = exerciseContent(exercise);
+  logReorderRaw(exercise);
   if (['video_embed', 'embed'].includes(exercise.type)) return embedBlockMarkup(exercise);
   const dataError = exerciseDataError(exercise); if (dataError) { console.error(dataError, exerciseDiagnosticShape(exercise)); return `<section class="worksheet-exercise task-section exercise-data-error" data-exercise="${escapeAttr(exercise.id || '')}"><div class="task-heading"><div><span class="task-label">Task ${index + 1}</span><h3>${escapeHtml(exercise.instruction || exercise.type || 'Exercise')}</h3></div></div><p class="feedback">${escapeHtml(dataError)}</p></section>`; }
   if (exercise.type === 'multiple_choice') answer = multipleChoiceMarkup(exercise);
