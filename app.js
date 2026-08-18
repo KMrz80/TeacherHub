@@ -211,6 +211,7 @@ async function openTeacherHomeworkPreview(homeworkId) {
       pb.collection('worksheet_exercises').getFullList({ filter: `worksheet="${homework.worksheet}"`, sort: 'order', requestKey: null }),
     ]);
     if (worksheet.status !== 'published') { toast('Связанный worksheet ещё не опубликован.'); return; }
+    logExerciseDiagnostics(`teacher published preview ${worksheet.id}`, exercises);
     const content = el('teacher-worksheet-preview-content'); content.innerHTML = worksheetPageMarkup(worksheet, exercises, true); bindWorksheetInteractions(content); el('teacher-worksheet-preview').showModal();
   } catch (error) { handleFatal(error); } finally { setLoading(false); }
 }
@@ -222,6 +223,7 @@ async function openBuilderPublishedPreview(worksheetId) {
       pb.collection('worksheets').getOne(worksheetId, { requestKey: null }),
       pb.collection('worksheet_exercises').getFullList({ filter: `worksheet="${worksheetId}"`, sort: 'order', requestKey: null }),
     ]);
+    logExerciseDiagnostics(`builder published preview ${worksheet.id}`, exercises);
     const content = el('worksheet-preview-content'); content.innerHTML = worksheetPageMarkup(worksheet, exercises, true); bindWorksheetInteractions(content); el('worksheet-preview-dialog').showModal();
   } catch (error) { handleFatal(error); } finally { setLoading(false); }
 }
@@ -471,17 +473,10 @@ function updateSelectedSources() { const form = el('worksheet-form'); rememberSo
 
 function answerList(value) { if (Array.isArray(value)) return value.map((item) => String(item)); if (value === null || value === undefined || value === '') return []; return [String(value)]; }
 function normalizeDraftExercise(record) {
-  const content = record.content && typeof record.content === 'object' ? record.content : {};
-  const question = String(content.question || content.prompt_text || '').trim();
-  const instruction = [record.instruction, question && question !== record.instruction ? question : ''].filter(Boolean).join(' ');
-  let correctAnswer = record.correct_answer ?? content.correct_answer ?? null;
-  if (record.type === 'multiple_choice') correctAnswer = answerList(correctAnswer);
-  if (record.type === 'text_input') correctAnswer = [...new Set([...answerList(correctAnswer), ...answerList(content.answer), ...answerList(content.acceptable_answers)])];
-  if (record.type === 'reorder_words') correctAnswer = Array.isArray(correctAnswer) ? correctAnswer : (content.correct_sequence || content.words || answerList(correctAnswer));
-  if (record.type === 'matching' && (!correctAnswer || Array.isArray(correctAnswer))) correctAnswer = Object.fromEntries((content.pairs || []).map((pair) => [pair.left, pair.right]));
-  if (record.type === 'dropdown' && !content.items && Array.isArray(content.sentences)) content.items = content.sentences;
-  return { ...record, _recordId: record.id, instruction, content, correct_answer: correctAnswer };
+  return { ...record, _recordId: record.id, content: exerciseContent(record), instruction: record.instruction || '', correct_answer: record.correct_answer ?? null };
 }
+function exerciseDiagnosticShape(exercise) { const content = exerciseContent(exercise), items = Array.isArray(content.items) ? content.items : [], pairs = Array.isArray(content.pairs) ? content.pairs : []; return { id: exercise.id, type: exercise.type, order: exercise.order, instruction: exercise.instruction, points: exercise.points, content, item_count: items.length, pair_count: pairs.length, correct_answer: exercise.correct_answer ?? null }; }
+function logExerciseDiagnostics(stage, records) { console.groupCollapsed(`[TeacherHub worksheet diagnostics] ${stage}`); records.forEach((record) => { console.groupCollapsed(`${record.order}: ${record.type} (${record.id})`); console.log('exercise id:', record.id); console.log('type:', record.type); console.log('raw DB content:', record.content); console.log('parsed content:', exerciseContent(record)); console.log('parsed/normalized exercise:', exerciseDiagnosticShape(normalizeDraftExercise(record))); console.groupEnd(); }); console.groupEnd(); }
 function datetimeLocalValue(value) { if (!value) return ''; const date = new Date(value); if (Number.isNaN(date.getTime())) return ''; const offset = date.getTimezoneOffset() * 60000; return new Date(date.getTime() - offset).toISOString().slice(0, 16); }
 
 async function openWorksheetDraft(id, freshDraft = null) {
@@ -493,6 +488,7 @@ async function openWorksheetDraft(id, freshDraft = null) {
       pb.collection('worksheet_sources').getFullList({ filter: `worksheet="${id}"`, sort: 'order', requestKey: null }),
       pb.collection('homework').getList(1, 1, { filter: `worksheet="${id}"`, sort: '-created', requestKey: null }).catch(() => ({ items: [] })),
     ]);
+    logExerciseDiagnostics(`draft load ${id}`, exerciseRecords);
     state.editingWorksheet = draft; state.editingSources = sources; state.editingHomework = homeworkResult.items[0] || null; state.editingExerciseIds = exerciseRecords.map((record) => record.id); state.previewExercises = exerciseRecords; state.sourceMetadata = Object.fromEntries(sources.map((source) => [source.source_type === 'library' ? `library-${source.material}` : `saved-${source.id}`, source.metadata || {}]));
     const form = el('worksheet-form'); form.elements.student.value = draft.student || state.editingHomework?.student || ''; form.elements.worksheet_title.value = draft.title || ''; form.elements.work_goal.value = draft.instructions || draft.focus || ''; form.elements.intro_text.value = draft.intro_text || ''; form.elements.estimated_time.value = draft.estimated_time || ''; form.elements.due_date.value = datetimeLocalValue(draft.due_date || state.editingHomework?.due_date);
     form.querySelectorAll('[name="library_sources"]').forEach((input) => { input.checked = sources.some((source) => source.source_type === 'library' && source.material === input.value); });
@@ -679,10 +675,22 @@ function dropdownItemMarkupStudent(exercise, item, itemIndex) { const itemText =
 function dropdownSelectMarkup(exercise, itemIndex, gapIndex, options) { return `<select name="ws-${exercise.id}-${itemIndex}-${gapIndex}" aria-label="Выберите вариант"><option value="">Выберите…</option>${options.map((option) => `<option value="${escapeAttr(option)}">${escapeHtml(option)}</option>`).join('')}</select>`; }
 function matchingData(exercise) { const content = exercise.content || {}; if (Array.isArray(content.pairs)) return content.pairs.filter((pair) => pair?.left !== undefined && pair?.right !== undefined); if (Array.isArray(content.left)) return content.left.map((left) => ({ left, right: exercise.correct_answer?.[left] })).filter((pair) => pair.right !== undefined); return Object.entries(exercise.correct_answer || {}).map(([left, right]) => ({ left, right })); }
 function reorderItems(exercise) { const content = exerciseContent(exercise); return exerciseItems(exercise).map((item) => { const nested = item?.content && typeof item.content === 'object' ? item.content : {}; const answer = item.correct_answer ?? nested.correct_answer ?? exercise.correct_answer, rawWords = item.words ?? nested.words ?? content.words ?? [], words = Array.isArray(rawWords) ? rawWords.map((word) => typeof word === 'object' ? (word.text || word.word || word.content || '') : String(word)).filter(Boolean) : String(rawWords).split(/\s+/).filter(Boolean), correct = Array.isArray(answer) ? answer.map(String) : String(answer || '').match(/[\p{L}\p{N}'’]+|[^\s\p{L}\p{N}'’]/gu) || []; return { prompt: item.question || item.text || item.prompt || '', words, correct }; }); }
+function exerciseDataError(exercise) {
+  const content = exerciseContent(exercise), items = exerciseItems(exercise);
+  if (!exercise.type || !exercise.instruction) return `Exercise data is invalid: ${exercise.type || 'unknown'}`;
+  if (exercise.type === 'multiple_choice' && (!items.length || items.some((item) => !Array.isArray(item.options || content.options) || (item.options || content.options).length < 2))) return `Exercise data is invalid: ${exercise.type}`;
+  if (exercise.type === 'dropdown' && (!items.length || items.some((item) => { const gaps = dropdownGapData(item); return !gaps.length || gaps.some((gap) => !Array.isArray(gap.options) || gap.options.length < 2 || gap.correct_answer === undefined || gap.correct_answer === null || gap.correct_answer === ''); }))) return `Exercise data is invalid: ${exercise.type}`;
+  if (exercise.type === 'reorder_words' && (!items.length || reorderItems(exercise).some((item) => !item.words.length || !item.correct.length))) return `Exercise data is invalid: ${exercise.type}`;
+  if (exercise.type === 'matching' && !matchingData(exercise).length) return `Exercise data is invalid: ${exercise.type}`;
+  if (exercise.type === 'text_input' && !answerList(exercise.correct_answer).length) return `Exercise data is invalid: ${exercise.type}`;
+  if (exercise.type === 'open_text_teacher_review' && !content.prompt) return `Exercise data is invalid: ${exercise.type}`;
+  return '';
+}
 
 function worksheetExerciseMarkup(exercise, index) {
   let answer = ''; const content = exerciseContent(exercise);
   if (['video_embed', 'embed'].includes(exercise.type)) return embedBlockMarkup(exercise);
+  const dataError = exerciseDataError(exercise); if (dataError) { console.error(dataError, exerciseDiagnosticShape(exercise)); return `<section class="worksheet-exercise task-section exercise-data-error" data-exercise="${escapeAttr(exercise.id || '')}"><div class="task-heading"><div><span class="task-label">Task ${index + 1}</span><h3>${escapeHtml(exercise.instruction || exercise.type || 'Exercise')}</h3></div></div><p class="feedback">${escapeHtml(dataError)}</p></section>`; }
   if (exercise.type === 'multiple_choice') answer = multipleChoiceMarkup(exercise);
   if (exercise.type === 'text_input') answer = `<input class="text-answer" name="ws-${exercise.id}" autocomplete="off">`;
   if (exercise.type === 'reorder_words') answer = reorderItems(exercise).map((item, itemIndex) => `<div class="reorder-item" data-item-index="${itemIndex}">${item.prompt ? `<p class="item-prompt">${escapeHtml(item.prompt)}</p>` : ''}<div class="word-bank">${item.words.map((word, wordIndex) => `<button class="word-token" data-index="${wordIndex}" type="button">${escapeHtml(word)}</button>`).join('')}</div><div class="word-answer" aria-label="Составленное предложение"></div></div>`).join('');
