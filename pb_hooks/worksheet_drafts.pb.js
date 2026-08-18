@@ -29,7 +29,6 @@ routerAdd("POST", "/api/teacherhub/worksheet-drafts", (e) => {
 
   try {
     const body = e.requestInfo().body || {}
-    console.log("[TeacherHub Action] createWorksheetDraft payload:", JSON.stringify(body))
     const title = text(body.title)
     const learningGoal = text(body.learning_goal)
     if (!title) throw actionError("Поле title обязательно", 400)
