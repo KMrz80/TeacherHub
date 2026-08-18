@@ -501,9 +501,13 @@ async function refreshCurrentActionDraft(manual = false) {
   state.draftRefreshRunning = true;
   try {
     const currentId = state.editingWorksheet.id;
-    const fresh = await pb.collection('worksheets').getOne(currentId, { requestKey: null });
+    const [fresh, freshExercises] = await Promise.all([
+      pb.collection('worksheets').getOne(currentId, { requestKey: null }),
+      pb.collection('worksheet_exercises').getFullList({ filter: `worksheet="${currentId}"`, sort: 'order', requestKey: null }),
+    ]);
     if (fresh.status !== 'draft') return;
-    const changed = fresh.updated !== state.editingWorksheet.updated;
+    const exerciseSignature = (records) => (records || []).map((record) => `${record.id}:${record.updated}:${record.type}:${record.order}:${JSON.stringify(record.content)}`).join('|');
+    const changed = fresh.updated !== state.editingWorksheet.updated || exerciseSignature(freshExercises) !== exerciseSignature(state.previewExercises);
     if (!changed && !manual) return;
     const draftIndex = state.builderDrafts.findIndex((item) => item.id === currentId); if (draftIndex >= 0) state.builderDrafts[draftIndex] = fresh; else state.builderDrafts.unshift(fresh);
     await openWorksheetDraft(currentId, fresh);
