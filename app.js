@@ -5,7 +5,7 @@ const pb = new PocketBase(PB_URL);
 const SOURCE_UPLOAD_LIMIT = 100 * 1024 * 1024;
 
 const el = (id) => document.getElementById(id);
-const state = { role: '', route: 'home', navigationId: 0, students: [], student: null, progress: null, homework: null, homeworks: [], tasks: [], result: null, editingStudentId: null, homeworkStudentId: null, pendingWorksheetStudentId: null, questionCount: 0 };
+const state = { role: '', route: 'home', navigationId: 0, students: [], student: null, progress: null, homework: null, homeworks: [], tasks: [], result: null, results: [], editingStudentId: null, homeworkStudentId: null, pendingWorksheetStudentId: null, questionCount: 0 };
 const skills = [
   ['vocabulary', 'Vocabulary', 'V'], ['grammar', 'Grammar', 'G'], ['reading', 'Reading', 'R'],
   ['listening', 'Listening', 'L'], ['speaking', 'Speaking', 'S'],
@@ -38,7 +38,7 @@ async function enterApp() {
 }
 
 function showLogin() { el('login-view').classList.remove('hidden'); el('workspace').classList.add('hidden'); }
-function logout() { pb.authStore.clear(); Object.assign(state, { role: '', route: 'home', students: [], student: null, progress: null, homework: null, homeworks: [], tasks: [], result: null }); showLogin(); }
+function logout() { pb.authStore.clear(); Object.assign(state, { role: '', route: 'home', students: [], student: null, progress: null, homework: null, homeworks: [], tasks: [], result: null, results: [] }); showLogin(); }
 
 function renderShell() {
   const parentItems = [['home', '⌂', 'Главная'], ['homework', '▤', 'Домашнее задание'], ['progress', '⌁', 'Прогресс']];
@@ -78,7 +78,7 @@ async function loadParentData() {
       expand: 'worksheet',
       requestKey: null,
     }),
-    pb.collection('homework_results').getList(1, 1, {
+    pb.collection('homework_results').getFullList({
       filter: `student="${state.student.id}"`,
       sort: '-completed_at',
       expand: 'homework',
@@ -89,7 +89,8 @@ async function loadParentData() {
   state.progress = progressResult.status === 'fulfilled' ? progressResult.value : null;
   state.homeworks = homeworkResult.status === 'fulfilled' ? homeworkResult.value : [];
   state.homework = state.homeworks[0] || null;
-  state.result = resultsResult.status === 'fulfilled' ? resultsResult.value.items[0] || null : null;
+  state.results = resultsResult.status === 'fulfilled' ? resultsResult.value : [];
+  state.result = state.results[0] || null;
 
   if (progressResult.status === 'rejected') console.warn('Progress is unavailable:', progressResult.reason);
   if (homeworkResult.status === 'rejected') console.warn('Homework is unavailable:', homeworkResult.reason);
@@ -123,8 +124,9 @@ function renderParentHome() {
 function homeworkCard() {
   const homeworks = state.homeworks || [];
   if (!homeworks.length) return '<section class="card homework-card"><div class="card-title"><div class="icon-box">✓</div><h2>Домашние задания</h2></div><div class="empty-state">Пока нет домашнего задания</div></section>';
-  return `<section class="card homework-card"><div class="card-title"><div class="icon-box">▤</div><h2>Домашние задания</h2></div><div class="homework-list">${homeworks.map((homework) => `<article class="homework-list-item"><div><h3 class="homework-title">${escapeHtml(homework.title)}</h3>${homework.instructions ? `<p class="homework-instructions">${escapeHtml(homework.instructions)}</p>` : ''}<p class="muted">Срок: ${formatDate(homework.due_date, true)} · Опубликовано</p></div><button class="primary-button open-homework" data-homework-id="${homework.id}" type="button">Открыть &nbsp;→</button></article>`).join('')}</div></section>`;
+  return `<section class="card homework-card"><div class="card-title"><div class="icon-box">▤</div><h2>Домашние задания</h2></div><div class="homework-list">${homeworks.map((homework) => { const result = homeworkResultFor(homework.id); return `<article class="homework-list-item"><div><h3 class="homework-title">${escapeHtml(homework.title)}</h3>${homework.instructions ? `<p class="homework-instructions">${escapeHtml(homework.instructions)}</p>` : ''}<p class="muted">Срок: ${formatDate(homework.due_date, true)} · Опубликовано</p>${result ? `<strong class="homework-result-status">${result.status === 'needs_review' ? `Выполнено: ${result.score}/${result.max_score} · ожидает проверки` : `Выполнено: ${result.score}/${result.max_score}`}</strong>` : '<span class="muted">Не выполнено</span>'}</div><button class="primary-button open-homework" data-homework-id="${homework.id}" type="button">Открыть &nbsp;→</button></article>`; }).join('')}</div></section>`;
 }
+function homeworkResultFor(homeworkId) { return (state.results || []).find((result) => result.homework === homeworkId) || null; }
 
 function renderHomeworkOverview() {
   setHeader('Домашнее задание', 'Опубликованное задание по текущей теме.', state.student.current_topic || 'English');
@@ -167,7 +169,7 @@ async function checkHomework(event) {
   try {
     const data = { homework: state.homework.id, student: state.student.id, score, max_score: maxScore, percentage, completed_at: new Date().toISOString() };
     const existing = await pb.collection('homework_results').getFirstListItem(`homework="${state.homework.id}" && student="${state.student.id}"`, { requestKey: null }).catch(() => null);
-    state.result = existing ? await pb.collection('homework_results').update(existing.id, data) : await pb.collection('homework_results').create(data);
+    state.result = existing ? await pb.collection('homework_results').update(existing.id, data) : await pb.collection('homework_results').create(data); syncParentResult(state.result);
     toast(`Результат сохранён: ${score} из ${maxScore} (${percentage}%)`);
   } catch (error) { handleFatal(error); } finally { setLoading(false); }
 }
@@ -686,20 +688,8 @@ function exerciseDataError(exercise) {
   if (exercise.type === 'open_text_teacher_review' && !content.prompt) return `Exercise data is invalid: ${exercise.type}`;
   return '';
 }
-function logReorderRaw(exercise) {
-  if (exercise.type !== 'reorder_words') return;
-  console.log('[REORDER RAW]', { id: exercise.id, type: exercise.type, instruction: exercise.instruction, content: exercise.content, correct_answer: exercise.correct_answer });
-  let parsedContent = exercise.content;
-  if (typeof parsedContent === 'string') { try { parsedContent = JSON.parse(parsedContent); } catch (error) { console.error('[REORDER PARSE ERROR]', error); } }
-  console.log('[REORDER PARSED]', parsedContent);
-  console.log('[REORDER ITEMS IS ARRAY]', Array.isArray(parsedContent?.items));
-  console.log('[REORDER ITEMS]', parsedContent?.items);
-  if (Array.isArray(parsedContent?.items)) parsedContent.items.forEach((item, index) => console.log('[REORDER ITEM]', { index, words: item?.words, words_type: typeof item?.words, words_is_array: Array.isArray(item?.words), correct_answer: item?.correct_answer }));
-}
-
 function worksheetExerciseMarkup(exercise, index) {
   let answer = ''; const content = exerciseContent(exercise);
-  logReorderRaw(exercise);
   if (['video_embed', 'embed'].includes(exercise.type)) return embedBlockMarkup(exercise);
   const dataError = exerciseDataError(exercise); if (dataError) { console.error(dataError, exerciseDiagnosticShape(exercise)); return `<section class="worksheet-exercise task-section exercise-data-error" data-exercise="${escapeAttr(exercise.id || '')}"><div class="task-heading"><div><span class="task-label">Task ${index + 1}</span><h3>${escapeHtml(exercise.instruction || exercise.type || 'Exercise')}</h3></div></div><p class="feedback">${escapeHtml(dataError)}</p></section>`; }
   if (exercise.type === 'multiple_choice') answer = multipleChoiceMarkup(exercise);
@@ -739,13 +729,14 @@ async function checkWorksheet(event) {
     if (correct) score += points; section.classList.toggle('correct', correct); section.classList.toggle('incorrect', !correct); section.querySelector('.feedback').textContent = correct ? 'Верно' : 'Проверьте ответ';
   });
   const percentage = maxScore ? Math.round(score / maxScore * 100) : 0; setLoading(true);
-  try { const needsReview = openAnswers.length > 0, data = { homework: state.homework.id, student: state.student.id, score, max_score: maxScore, percentage, status: needsReview ? 'needs_review' : 'completed', open_answers: openAnswers, completed_at: new Date().toISOString() }; const existing = await pb.collection('homework_results').getFirstListItem(`homework="${state.homework.id}" && student="${state.student.id}"`, { requestKey: null }).catch(() => null); state.result = existing ? await pb.collection('homework_results').update(existing.id, data) : await pb.collection('homework_results').create(data); el('worksheet-score').textContent = needsReview ? (maxScore ? `Автопроверка: ${score}/${maxScore} · ответ ожидает проверки` : 'Ответ отправлен преподавателю') : `Результат: ${score}/${maxScore} · ${percentage}%`; toast(needsReview ? 'Ответ отправлен преподавателю' : 'Результат сохранён'); } catch (error) { handleFatal(error); } finally { setLoading(false); }
+  try { const needsReview = openAnswers.length > 0, data = { homework: state.homework.id, student: state.student.id, score, max_score: maxScore, percentage, status: needsReview ? 'needs_review' : 'completed', open_answers: openAnswers, completed_at: new Date().toISOString() }; const existing = await pb.collection('homework_results').getFirstListItem(`homework="${state.homework.id}" && student="${state.student.id}"`, { requestKey: null }).catch(() => null); state.result = existing ? await pb.collection('homework_results').update(existing.id, data) : await pb.collection('homework_results').create(data); syncParentResult(state.result); el('worksheet-score').textContent = needsReview ? (maxScore ? `Автопроверка: ${score}/${maxScore} · ответ ожидает проверки` : 'Ответ отправлен преподавателю') : `Результат: ${score}/${maxScore} · ${percentage}%`; toast(needsReview ? 'Ответ отправлен преподавателю' : 'Результат сохранён'); } catch (error) { handleFatal(error); } finally { setLoading(false); }
 }
 
 function shuffle(items) { const copy = [...items]; for (let i = copy.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [copy[i], copy[j]] = [copy[j], copy[i]]; } return copy; }
 
 function skillsMarkup(progress) { return skills.map(([key, label, icon]) => { const value = Number(progress?.[key] || 0); return `<div class="skill-row"><span class="skill-icon ${key}">${icon}</span><span>${label}</span><div class="bar"><div class="bar-fill ${key}" data-width="${value}"></div></div><span class="value">${value}%</span></div>`; }).join(''); }
-function bindHomeworkButtons() { document.querySelectorAll('.open-homework').forEach((button) => button.addEventListener('click', () => { const selected = (state.homeworks || []).find((homework) => homework.id === button.dataset.homeworkId); if (!selected) { toast('Домашнее задание не найдено.'); return; } state.homework = selected; navigate('task'); })); }
+function syncParentResult(result) { const index = state.results.findIndex((item) => item.id === result.id); if (index >= 0) state.results[index] = result; else state.results.unshift(result); }
+function bindHomeworkButtons() { document.querySelectorAll('.open-homework').forEach((button) => button.addEventListener('click', () => { const selected = (state.homeworks || []).find((homework) => homework.id === button.dataset.homeworkId); if (!selected) { toast('Домашнее задание не найдено.'); return; } state.homework = selected; state.result = homeworkResultFor(selected.id); navigate('task'); })); }
 function animateBars() { requestAnimationFrame(() => requestAnimationFrame(() => document.querySelectorAll('.bar-fill').forEach((bar) => { bar.style.width = `${Math.max(0, Math.min(100, Number(bar.dataset.width)))}%`; }))); }
 function average(progress) { return Math.round(skills.reduce((sum, [key]) => sum + Number(progress?.[key] || 0), 0) / skills.length); }
 function formatDate(value, time = false) { if (!value) return 'не указан'; const date = new Date(value.replace(' ', 'T')); return Number.isNaN(date.getTime()) ? value : new Intl.DateTimeFormat('ru-RU', { day: 'numeric', month: 'long', ...(time ? { hour: '2-digit', minute: '2-digit' } : {}) }).format(date); }

@@ -61,6 +61,15 @@ routerAdd("POST", "/api/teacherhub/worksheet-drafts", (e) => {
       if (!allowedTypes.includes(type)) throw actionError(`Упражнение ${index + 1}: неизвестный type`, 400)
       if (!instruction) throw actionError(`Упражнение ${index + 1}: instruction обязателен`, 400)
       if (!content) throw actionError(`Упражнение ${index + 1}: content должен быть объектом`, 400)
+      if (type === "reorder_words") {
+        if (!Array.isArray(content.items) || !content.items.length) throw actionError(`Упражнение ${index + 1}: reorder_words content.items должен быть непустым массивом`, 400)
+        content.items.forEach((item, itemIndex) => {
+          const itemNumber = itemIndex + 1
+          if (!item || typeof item !== "object" || Array.isArray(item)) throw actionError(`Упражнение ${index + 1}, item ${itemNumber}: должен быть объектом`, 400)
+          if (!Array.isArray(item.words) || !item.words.length || item.words.some((word) => typeof word !== "string" || !word.trim())) throw actionError(`Упражнение ${index + 1}, item ${itemNumber}: words должен быть непустым массивом строк`, 400)
+          if (typeof item.correct_answer !== "string" || !item.correct_answer.trim()) throw actionError(`Упражнение ${index + 1}, item ${itemNumber}: correct_answer должен быть непустой строкой`, 400)
+        })
+      }
       const points = Number(exercise.points), order = Number(exercise.order)
       if (!Number.isFinite(points) || points < 0) throw actionError(`Упражнение ${index + 1}: points должен быть неотрицательным числом`, 400)
       return { type, instruction, content, points, order: Number.isFinite(order) && order >= 0 ? order : index, correctAnswer: actionCorrectAnswer(type, content) }
